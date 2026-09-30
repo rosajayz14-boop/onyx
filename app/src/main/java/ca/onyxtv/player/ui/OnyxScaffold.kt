@@ -29,7 +29,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.focusGroup
+import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -76,6 +79,7 @@ enum class Dest(val label: String, val icon: ImageVector) {
     SETTINGS("Réglages", Icons.Rounded.Settings),
 }
 
+@OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
 @Composable
 fun OnyxRoot(vm: OnyxViewModel = viewModel()) {
     var dest by remember { mutableStateOf(Dest.HOME) }
@@ -131,6 +135,15 @@ fun OnyxRoot(vm: OnyxViewModel = viewModel()) {
         onDispose { lifecycleOwner.lifecycle.removeObserver(obs) }
     }
 
+    // Focus automatique dans le contenu : à chaque changement de page et au retour d'une fiche /
+    // du lecteur, le focus est placé (ou restauré) dans la page → les flèches marchent tout de
+    // suite, sans avoir à appuyer sur OK.
+    val contentFocus = remember { FocusRequester() }
+    LaunchedEffect(dest) { delay(150); runCatching { contentFocus.requestFocus() } }
+    LaunchedEffect(playing, openDetail) {
+        if (playing == null && openDetail == null) { delay(150); runCatching { contentFocus.requestFocus() } }
+    }
+
     // Tant qu'une fiche (film/série) ou le lecteur est ouvert, le contenu en dessous ne doit
     // JAMAIS recevoir le focus de la télécommande (sinon les touches agissent sur l'écran caché).
     val overlayOpen = playing != null || openDetail != null
@@ -184,7 +197,13 @@ fun OnyxRoot(vm: OnyxViewModel = viewModel()) {
                 }
             },
         ) {
-            Box(Modifier.fillMaxSize()) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .focusRequester(contentFocus)
+                    .focusRestorer()
+                    .focusGroup()
+            ) {
                 when (dest) {
                     Dest.HOME -> HomeScreen(vm, onPlay = { playing = it }, onGoLive = { dest = Dest.LIVE }, onGoSettings = { dest = Dest.SETTINGS }, onOpenDetail = { openDetail = it })
                     Dest.LIVE -> LiveTvScreen(vm, onPlay = { playing = it })
