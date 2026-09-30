@@ -330,15 +330,11 @@ private fun PlaybackCard(vm: OnyxViewModel) {
         }
         Spacer(Modifier.height(8.dp))
         Text(
-            "Dans le lecteur : ▲ passe l'intro (début) ou lance l'épisode suivant (fin) ; ◀ / ▶ reculent / avancent.",
+            "Dans le lecteur : ◀ / ▶ reculent / avancent ; ▲ en fin d'épisode lance le suivant.",
             color = OnyxMuted, style = MaterialTheme.typography.bodyMedium,
         )
         Spacer(Modifier.height(6.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            val intros = listOf(60, 85, 90, 120)
-            Button(onClick = { vm.setIntroSkip(intros[(intros.indexOf(prefs.introSkipSeconds).coerceAtLeast(0) + 1) % intros.size]) }) {
-                Text("Passer l'intro : ${prefs.introSkipSeconds} s")
-            }
             val steps = listOf(10 to 30, 15 to 30, 30 to 60, 10 to 10)
             Button(onClick = {
                 val i = steps.indexOfFirst { it.first == prefs.seekBackSeconds && it.second == prefs.seekForwardSeconds }

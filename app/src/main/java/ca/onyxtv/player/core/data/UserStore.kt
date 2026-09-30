@@ -56,8 +56,6 @@ data class AppPrefs(
     val resumeOnStart: Boolean = false,
     /** Dernière vérification de mise à jour de l'application (epoch ms). */
     val lastUpdateCheck: Long = 0,
-    /** Durée sautée par « Passer l'intro » (secondes). */
-    val introSkipSeconds: Int = 85,
     /** Pas de recul / d'avance avec ◀ / ▶ (secondes). */
     val seekBackSeconds: Int = 10,
     val seekForwardSeconds: Int = 30,

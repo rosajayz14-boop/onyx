@@ -133,7 +133,6 @@ fun PlayerScreen(
     zapToNumber: ((Int) -> PlayTarget?)? = null,
     /** Titre du programme en cours (EPG) pour le direct. */
     nowPlaying: (suspend (PlayTarget) -> String?)? = null,
-    introSkipSeconds: Int = 85,
     seekBackSeconds: Int = 10,
     seekForwardSeconds: Int = 30,
 ) {
@@ -157,8 +156,7 @@ fun PlayerScreen(
     var seekNote by remember { mutableStateOf<String?>(null) }
     var playerView by remember { mutableStateOf<PlayerView?>(null) }
 
-    // Fenêtres « intro » (3 premières minutes) et « générique » (3 dernières minutes) pour la VOD.
-    val inIntro = !target.isLive && durMs > 10 * 60_000L && posMs < 3 * 60_000L
+    // Fenêtre « générique » (3 dernières minutes) pour la VOD : ▲ lance l'épisode suivant.
     val inCredits = !target.isLive && durMs > 0 && target.next != null && durMs - posMs in 1..(3 * 60_000L)
 
     val currentTarget by rememberUpdatedState(target)
@@ -191,8 +189,6 @@ fun PlayerScreen(
         posMs = to
         seekNote = (if (deltaMs >= 0) "⏩ +" else "⏪ −") + "${kotlin.math.abs(deltaMs) / 1000} s   ${fmtClock(to)} / ${fmtClock(dur)}"
     }
-
-    fun skipIntro() { seekBy(introSkipSeconds * 1000L); seekNote = "⏭ Intro passée (+$introSkipSeconds s)" }
 
     fun skipCredits(): Boolean {
         val next = currentTarget.next ?: return false
@@ -358,7 +354,6 @@ fun PlayerScreen(
                     ev.key == Key.Menu -> { panelOpen = true; true }
                     // VOD : ▲ passe l'intro au début, lance l'épisode suivant à la fin.
                     !currentTarget.isLive && ev.key == Key.DirectionUp && inCredits -> skipCredits()
-                    !currentTarget.isLive && ev.key == Key.DirectionUp && inIntro -> { skipIntro(); true }
                     // VOD : ◀ / ▶ = recul / avance quand la barre de contrôle est masquée.
                     !currentTarget.isLive && !controllerShown && ev.key == Key.DirectionLeft -> { seekBy(-seekBackSeconds * 1000L); true }
                     !currentTarget.isLive && !controllerShown && ev.key == Key.DirectionRight -> { seekBy(seekForwardSeconds * 1000L); true }
@@ -441,7 +436,6 @@ fun PlayerScreen(
             ended || error != null || panelOpen -> null
             seekNote != null -> seekNote
             inCredits -> "▲ Passer le générique → épisode suivant"
-            inIntro -> "▲ Passer l'intro (+$introSkipSeconds s)"
             else -> null
         }
         hint?.let {
@@ -497,11 +491,8 @@ fun PlayerScreen(
 
                 if (!target.isLive) {
                     Text("Navigation", style = MaterialTheme.typography.titleMedium, color = OnyxCyan, modifier = Modifier.padding(top = 8.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(onClick = { skipIntro(); panelOpen = false }) { Text("⏭ Passer l'intro") }
-                        if (target.next != null) Button(onClick = { skipCredits() }) { Text("⏭ Épisode suivant") }
-                    }
-                    Text("◀ −$seekBackSeconds s   ▶ +$seekForwardSeconds s   ▲ intro / générique", color = OnyxMuted, style = MaterialTheme.typography.bodyMedium)
+                    if (target.next != null) Button(onClick = { skipCredits() }) { Text("⏭ Épisode suivant") }
+                    Text("◀ −$seekBackSeconds s   ▶ +$seekForwardSeconds s   ▲ générique → épisode suivant", color = OnyxMuted, style = MaterialTheme.typography.bodyMedium)
                 }
 
                 Text("Format d'image", style = MaterialTheme.typography.titleMedium, color = OnyxCyan, modifier = Modifier.padding(top = 8.dp))

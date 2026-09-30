@@ -1,8 +1,5 @@
 package ca.onyxtv.player.ui.movie
 
-import android.content.ActivityNotFoundException
-import android.content.Intent
-import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -32,7 +29,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -71,7 +67,6 @@ fun MovieScreen(
     onPlay: (PlayTarget) -> Unit,
     onBack: () -> Unit,
 ) {
-    val context = LocalContext.current
     val recents by vm.recents.collectAsStateWithLifecycle()
     val favorites by vm.favorites.collectAsStateWithLifecycle()
     val detail by produceState<MovieDetail?>(initialValue = null, item.id) {
@@ -79,23 +74,20 @@ fun MovieScreen(
     }
     val recent = recents.firstOrNull { it.id == item.id && it.resumable }
     val seen = recents.any { it.id == item.id && it.finished }
-    var trailerNote by remember { mutableStateOf<String?>(null) }
 
     BackHandler(enabled = true) { onBack() }
 
+    // Bande-annonce : YouTube lu dans l'app (lecteur embarqué) ; lien direct (mp4…) lu par ONYX.
+    var trailerId by remember { mutableStateOf<String?>(null) }
     fun openTrailer(url: String) {
-        val videoId = Regex("(?:v=|youtu\\.be/)([A-Za-z0-9_-]{6,})").find(url)?.groupValues?.get(1)
-        val attempts = listOfNotNull(
-            videoId?.let { Intent(Intent.ACTION_VIEW, Uri.parse("vnd.youtube:$it")) },
-            Intent(Intent.ACTION_VIEW, Uri.parse(url)),
-        )
-        for (i in attempts) {
-            try {
-                context.startActivity(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                return
-            } catch (_: ActivityNotFoundException) { /* essai suivant */ }
-        }
-        trailerNote = "Aucune application ne peut ouvrir la bande-annonce sur cet appareil (YouTube absent)."
+        val id = youtubeId(url)
+        if (id != null) trailerId = id
+        else onPlay(PlayTarget(url = url, title = "Bande-annonce · ${item.name}", subtitle = item.name, imageUrl = item.posterUrl))
+    }
+
+    trailerId?.let { id ->
+        TrailerScreen(videoId = id, title = item.name, onBack = { trailerId = null })
+        return
     }
 
     Box(Modifier.fillMaxSize().background(OnyxBg)) {
@@ -154,7 +146,6 @@ fun MovieScreen(
                         Text(if (item.id in favorites) "★ Retirer des favoris" else "☆ Ajouter aux favoris")
                     }
                 }
-                trailerNote?.let { Text(it, color = OnyxLive, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(bottom = 8.dp)) }
 
                 (d?.plot ?: item.plot)?.takeIf { it.isNotBlank() }?.let {
                     Text("Synopsis", color = OnyxCyan, style = MaterialTheme.typography.titleMedium)
