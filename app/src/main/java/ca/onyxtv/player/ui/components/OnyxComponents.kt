@@ -28,21 +28,49 @@ import androidx.compose.ui.unit.dp
 import androidx.tv.material3.Card
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.height
+import androidx.compose.material3.CircularProgressIndicator
+import ca.onyxtv.player.core.data.RecentItem
 import ca.onyxtv.player.core.model.Channel
 import ca.onyxtv.player.core.model.VodItem
 import ca.onyxtv.player.player.PlayTarget
+import ca.onyxtv.player.ui.theme.OnyxCyan
+import ca.onyxtv.player.ui.theme.OnyxLive
 import ca.onyxtv.player.ui.theme.OnyxMuted
+import ca.onyxtv.player.ui.theme.OnyxSurface
+import ca.onyxtv.player.ui.theme.OnyxViolet
 import coil.compose.AsyncImage
 import kotlin.math.abs
 
 // ---- Conversions vers une cible de lecture ----
 fun Channel.toPlayTarget() = PlayTarget(
+    id = id,
     url = url,
     title = (number?.let { "$it · " } ?: "") + name,
     subtitle = groupTitle,
+    imageUrl = logoUrl,
+    isLive = true,
 )
 
-fun VodItem.toPlayTarget() = PlayTarget(url = url, title = name, subtitle = category ?: year)
+fun VodItem.toPlayTarget() = PlayTarget(
+    id = id,
+    url = url,
+    title = name,
+    subtitle = category ?: year,
+    imageUrl = posterUrl,
+    isLive = false,
+)
+
+fun RecentItem.toPlayTarget() = PlayTarget(
+    id = id,
+    url = url,
+    title = title,
+    subtitle = subtitle,
+    imageUrl = imageUrl,
+    isLive = live,
+    startPositionMs = if (resumable) positionMs else 0L,
+)
 
 // ---- Dégradés de repli pour les vignettes sans logo/affiche ----
 private val cardBrushes = listOf(
@@ -94,6 +122,10 @@ fun MediaCard(
     width: Dp = 168.dp,
     aspectRatio: Float = 16f / 9f,
     initials: String? = null,
+    /** Progression de reprise 0f..1f (barre en bas de la vignette), null = aucune. */
+    progress: Float? = null,
+    /** Petit badge en haut à gauche (ex. « ★ », « DIRECT »). */
+    badge: String? = null,
 ) {
     Card(onClick = onClick, modifier = modifier.width(width)) {
         Column {
@@ -104,6 +136,34 @@ fun MediaCard(
                     .clip(RoundedCornerShape(6.dp))
             ) {
                 Thumbnail(imageUrl, initials, seed, Modifier.fillMaxSize())
+                if (badge != null) {
+                    Box(
+                        Modifier
+                            .align(Alignment.TopStart)
+                            .padding(6.dp)
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(Color(0xB3000000))
+                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                    ) {
+                        Text(badge, style = MaterialTheme.typography.labelLarge, color = OnyxCyan)
+                    }
+                }
+                if (progress != null && progress > 0f) {
+                    Box(
+                        Modifier
+                            .align(Alignment.BottomStart)
+                            .fillMaxWidth()
+                            .height(4.dp)
+                            .background(Color(0x66000000))
+                    ) {
+                        Box(
+                            Modifier
+                                .fillMaxHeight()
+                                .fillMaxWidth(progress.coerceIn(0f, 1f))
+                                .background(Brush.horizontalGradient(listOf(OnyxViolet, OnyxCyan)))
+                        )
+                    }
+                }
             }
             Column(Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
                 Text(
@@ -170,5 +230,30 @@ fun EmptyState(title: String, hint: String) {
             Text(title, style = MaterialTheme.typography.headlineMedium)
             Text(hint, style = MaterialTheme.typography.bodyLarge, color = OnyxMuted)
         }
+    }
+}
+
+/** État de chargement plein écran. */
+@Composable
+fun LoadingState(message: String = "Chargement de vos contenus…") {
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            CircularProgressIndicator(color = OnyxCyan)
+            Text(message, style = MaterialTheme.typography.bodyLarge, color = OnyxMuted)
+        }
+    }
+}
+
+/** Bandeau d'erreur discret en haut d'un écran. */
+@Composable
+fun ErrorBanner(message: String, modifier: Modifier = Modifier) {
+    Box(
+        modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(OnyxSurface)
+            .padding(horizontal = 16.dp, vertical = 12.dp)
+    ) {
+        Text(message, style = MaterialTheme.typography.bodyMedium, color = OnyxLive, maxLines = 2, overflow = TextOverflow.Ellipsis)
     }
 }

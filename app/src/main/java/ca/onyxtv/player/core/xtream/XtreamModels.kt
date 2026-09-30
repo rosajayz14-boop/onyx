@@ -11,6 +11,21 @@ import kotlinx.serialization.Serializable
  * on le lit en String via un sérialiseur tolérant côté client.
  */
 
+/** Réponse d'authentification (player_api.php sans action). */
+@Serializable
+data class XtAuthResponse(
+    @SerialName("user_info") val userInfo: XtUserInfo? = null,
+)
+
+@Serializable
+data class XtUserInfo(
+    @SerialName("auth") val auth: Int = 0,
+    @SerialName("status") val status: String = "",
+    @SerialName("exp_date") val expDate: String? = null,
+    @SerialName("active_cons") val activeCons: String? = null,
+    @SerialName("max_connections") val maxConnections: String? = null,
+)
+
 @Serializable
 data class XtCategory(
     @SerialName("category_id") val categoryId: String = "",

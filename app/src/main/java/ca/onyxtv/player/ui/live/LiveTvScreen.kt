@@ -1,6 +1,7 @@
 package ca.onyxtv.player.ui.live
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -26,6 +27,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.tv.material3.Button
@@ -36,8 +38,11 @@ import ca.onyxtv.player.core.model.Channel
 import ca.onyxtv.player.core.model.EpgProgram
 import ca.onyxtv.player.player.PlayTarget
 import ca.onyxtv.player.ui.components.EmptyState
+import ca.onyxtv.player.ui.components.ErrorBanner
+import ca.onyxtv.player.ui.components.LoadingState
 import ca.onyxtv.player.ui.components.Thumbnail
 import ca.onyxtv.player.ui.components.toPlayTarget
+import ca.onyxtv.player.ui.theme.OnyxCyan
 import ca.onyxtv.player.ui.theme.OnyxLive
 import ca.onyxtv.player.ui.theme.OnyxMuted
 import ca.onyxtv.player.ui.theme.OnyxSurfaceHi
@@ -49,60 +54,131 @@ import java.util.Locale
 private val HM = SimpleDateFormat("HH:mm", Locale.getDefault())
 private fun fmt(ms: Long) = HM.format(Date(ms))
 
+/** Groupes virtuels (en plus des catégories du fournisseur). */
+private const val GROUP_ALL = "\u0000all"
+private const val GROUP_FAV = "\u0000fav"
+
 @Composable
 fun LiveTvScreen(vm: OnyxViewModel, onPlay: (PlayTarget) -> Unit) {
     val state by vm.state.collectAsStateWithLifecycle()
+    val favorites by vm.favorites.collectAsStateWithLifecycle()
     val channels = state.channels
 
+    if (state.loading && channels.isEmpty()) {
+        LoadingState("Chargement des chaînes…")
+        return
+    }
     if (channels.isEmpty()) {
-        EmptyState(
-            title = "Aucune chaîne",
-            hint = "Ajoutez une liste M3U ou un compte Xtream dans Réglages.",
-        )
+        Column(Modifier.fillMaxSize()) {
+            state.error?.let { ErrorBanner(it, Modifier.padding(24.dp)) }
+            EmptyState(
+                title = "Aucune chaîne",
+                hint = "Ajoutez une liste M3U ou un compte Xtream dans Réglages.",
+            )
+        }
         return
     }
 
-    var selected by remember(channels) { mutableStateOf(channels.first()) }
+    val groups = remember(channels) { channels.mapNotNull { it.groupTitle }.distinct() }
+    var group by remember { mutableStateOf(GROUP_ALL) }
+    val filtered = remember(channels, group, favorites) {
+        when (group) {
+            GROUP_ALL -> channels
+            GROUP_FAV -> channels.filter { it.id in favorites }
+            else -> channels.filter { it.groupTitle == group }
+        }
+    }
+    var selected by remember(filtered) { mutableStateOf(filtered.firstOrNull()) }
 
     Row(Modifier.fillMaxSize().padding(24.dp)) {
-        LazyColumn(
-            modifier = Modifier.width(380.dp).fillMaxHeight(),
-        ) {
-            items(channels) { c ->
-                ListItem(
-                    selected = c.id == selected.id,
-                    onClick = { onPlay(c.toPlayTarget()) },
-                    leadingContent = {
-                        Box(
-                            Modifier
-                                .size(52.dp)
-                                .clip(RoundedCornerShape(6.dp))
-                        ) {
-                            Thumbnail(c.logoUrl, c.name.take(2).uppercase(), c.id, Modifier.fillMaxSize())
-                        }
-                    },
-                    headlineContent = {
-                        Text((c.number?.let { "$it · " } ?: "") + c.name, maxLines = 1)
-                    },
-                    supportingContent = {
-                        c.groupTitle?.let { Text(it, maxLines = 1, color = OnyxMuted) }
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 4.dp)
-                        .onFocusChanged { if (it.isFocused) selected = c },
+        // Colonne des catégories
+        LazyColumn(modifier = Modifier.width(230.dp).fillMaxHeight()) {
+            item {
+                Text("Catégories", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(bottom = 8.dp))
+            }
+            item { GroupItem("Toutes", channels.size, group == GROUP_ALL) { group = GROUP_ALL } }
+            item {
+                GroupItem("★ Favoris", channels.count { it.id in favorites }, group == GROUP_FAV) { group = GROUP_FAV }
+            }
+            items(groups, key = { it }) { g ->
+                GroupItem(g, channels.count { it.groupTitle == g }, group == g) { group = g }
+            }
+        }
+
+        Spacer(Modifier.width(16.dp))
+
+        // Liste des chaînes du groupe
+        if (filtered.isEmpty()) {
+            Box(Modifier.width(380.dp).fillMaxHeight(), contentAlignment = Alignment.Center) {
+                Text(
+                    if (group == GROUP_FAV) "Aucun favori. Sélectionnez une chaîne puis « Ajouter aux favoris »."
+                    else "Aucune chaîne dans cette catégorie.",
+                    color = OnyxMuted,
+                    style = MaterialTheme.typography.bodyLarge,
                 )
+            }
+        } else {
+            LazyColumn(modifier = Modifier.width(380.dp).fillMaxHeight()) {
+                items(filtered, key = { it.id }) { c ->
+                    ListItem(
+                        selected = c.id == selected?.id,
+                        onClick = { onPlay(c.toPlayTarget()) },
+                        leadingContent = {
+                            Box(Modifier.size(52.dp).clip(RoundedCornerShape(6.dp))) {
+                                Thumbnail(c.logoUrl, c.name.take(2).uppercase(), c.id, Modifier.fillMaxSize())
+                            }
+                        },
+                        headlineContent = {
+                            Text((c.number?.let { "$it · " } ?: "") + c.name, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        },
+                        supportingContent = {
+                            c.groupTitle?.let { Text(it, maxLines = 1, color = OnyxMuted, overflow = TextOverflow.Ellipsis) }
+                        },
+                        trailingContent = {
+                            if (c.id in favorites) Text("★", color = OnyxCyan)
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp)
+                            .onFocusChanged { if (it.isFocused) selected = c },
+                    )
+                }
             }
         }
 
         Spacer(Modifier.width(24.dp))
 
-        EpgPanel(vm = vm, channel = selected, onPlay = onPlay)
+        selected?.let { ch ->
+            EpgPanel(
+                vm = vm,
+                channel = ch,
+                isFavorite = ch.id in favorites,
+                onToggleFavorite = { vm.toggleFavorite(ch.id) },
+                onPlay = onPlay,
+            )
+        }
     }
 }
 
 @Composable
-private fun EpgPanel(vm: OnyxViewModel, channel: Channel, onPlay: (PlayTarget) -> Unit) {
+private fun GroupItem(name: String, count: Int, selected: Boolean, onClick: () -> Unit) {
+    ListItem(
+        selected = selected,
+        onClick = onClick,
+        headlineContent = { Text(name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+        trailingContent = { Text(count.toString(), color = OnyxMuted, style = MaterialTheme.typography.bodyMedium) },
+        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+    )
+}
+
+@Composable
+private fun EpgPanel(
+    vm: OnyxViewModel,
+    channel: Channel,
+    isFavorite: Boolean,
+    onToggleFavorite: () -> Unit,
+    onPlay: (PlayTarget) -> Unit,
+) {
     val programs by produceState(initialValue = emptyList<EpgProgram>(), channel.id) {
         value = runCatching { vm.epgFor(channel) }.getOrDefault(emptyList())
     }
@@ -123,13 +199,19 @@ private fun EpgPanel(vm: OnyxViewModel, channel: Channel, onPlay: (PlayTarget) -
             channel.name,
             style = MaterialTheme.typography.headlineLarge,
             modifier = Modifier.padding(top = 16.dp),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
         )
+        channel.groupTitle?.let { Text(it, color = OnyxMuted, style = MaterialTheme.typography.bodyMedium) }
         current?.let {
-            Text("● EN DIRECT · ${it.title}", color = OnyxLive, style = MaterialTheme.typography.titleMedium)
+            Text("● EN DIRECT · ${it.title}", color = OnyxLive, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
 
-        Button(onClick = { onPlay(channel.toPlayTarget()) }, modifier = Modifier.padding(vertical = 14.dp)) {
-            Text("Regarder")
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(vertical = 14.dp)) {
+            Button(onClick = { onPlay(channel.toPlayTarget()) }) { Text("Regarder") }
+            Button(onClick = onToggleFavorite) {
+                Text(if (isFavorite) "★ Retirer des favoris" else "☆ Ajouter aux favoris")
+            }
         }
 
         if (programs.isEmpty()) {
@@ -164,6 +246,8 @@ private fun EpgRow(p: EpgProgram, now: Long) {
             p.title,
             style = MaterialTheme.typography.titleMedium,
             color = if (live) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.onBackground,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
         )
     }
 }

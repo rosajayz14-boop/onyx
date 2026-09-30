@@ -36,6 +36,9 @@ class OnyxRepository(
         return out
     }
 
+    /** Teste un compte Xtream et renvoie un message d'état lisible. */
+    suspend fun probeXtream(src: PlaylistSource.Xtream): String = xt.probe(src)
+
     /** Contenus VOD (Xtream uniquement pour le MVP ; une M3U mélange souvent tout). */
     suspend fun vod(): List<VodItem> {
         val out = ArrayList<VodItem>()

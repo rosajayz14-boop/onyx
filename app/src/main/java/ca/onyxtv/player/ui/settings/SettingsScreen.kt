@@ -41,6 +41,7 @@ import ca.onyxtv.player.viewmodel.OnyxViewModel
 @Composable
 fun SettingsScreen(vm: OnyxViewModel) {
     val sources by vm.sources.collectAsStateWithLifecycle()
+    val status by vm.sourceStatus.collectAsStateWithLifecycle()
 
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(horizontal = 36.dp),
@@ -48,6 +49,21 @@ fun SettingsScreen(vm: OnyxViewModel) {
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         item { Text("Réglages", style = MaterialTheme.typography.headlineLarge) }
+        status?.let { msg ->
+            item {
+                val ok = msg.startsWith("Connect")
+                Text(
+                    msg,
+                    color = if (ok) OnyxLive else Md3.colorScheme.error,
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(OnyxSurface)
+                        .padding(14.dp),
+                )
+            }
+        }
         item { Text("Sources configurées", style = MaterialTheme.typography.titleLarge) }
 
         if (sources.isEmpty()) {

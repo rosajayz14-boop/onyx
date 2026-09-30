@@ -1,28 +1,50 @@
 package ca.onyxtv.player.ui.vod
 
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.items
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.tv.material3.Button
+import androidx.tv.material3.MaterialTheme
+import androidx.tv.material3.Text
 import ca.onyxtv.player.player.PlayTarget
 import ca.onyxtv.player.ui.components.EmptyState
+import ca.onyxtv.player.ui.components.LoadingState
 import ca.onyxtv.player.ui.components.MediaCard
 import ca.onyxtv.player.ui.components.toPlayTarget
+import ca.onyxtv.player.ui.theme.OnyxCyan
+import ca.onyxtv.player.ui.theme.OnyxMuted
 import ca.onyxtv.player.viewmodel.OnyxViewModel
 
 @Composable
 fun VodScreen(vm: OnyxViewModel, onPlay: (PlayTarget) -> Unit) {
     val state by vm.state.collectAsStateWithLifecycle()
+    val favorites by vm.favorites.collectAsStateWithLifecycle()
+    val recents by vm.recents.collectAsStateWithLifecycle()
     val vod = state.vod
 
+    if (state.loading && vod.isEmpty()) {
+        LoadingState("Chargement du catalogue…")
+        return
+    }
     if (vod.isEmpty()) {
         EmptyState(
             title = "Aucun film ou série",
@@ -31,24 +53,62 @@ fun VodScreen(vm: OnyxViewModel, onPlay: (PlayTarget) -> Unit) {
         return
     }
 
-    LazyVerticalGrid(
-        columns = GridCells.Adaptive(140.dp),
-        modifier = Modifier.fillMaxSize().padding(horizontal = 28.dp),
-        contentPadding = PaddingValues(vertical = 28.dp),
-        horizontalArrangement = Arrangement.spacedBy(16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-    ) {
-        items(vod) { v ->
-            MediaCard(
-                title = v.name,
-                subtitle = v.category ?: v.year,
-                imageUrl = v.posterUrl,
-                seed = v.id,
-                width = 140.dp,
-                aspectRatio = 2f / 3f,
-                initials = v.name.take(1).uppercase(),
-                onClick = { onPlay(v.toPlayTarget()) },
-            )
+    val categories = remember(vod) { vod.mapNotNull { it.category }.distinct() }
+    var category by remember { mutableStateOf<String?>(null) }
+    val shown = remember(vod, category) { if (category == null) vod else vod.filter { it.category == category } }
+    val progressById = remember(recents) { recents.filter { it.resumable }.associate { it.id to it.progress } }
+
+    Column(Modifier.fillMaxSize().padding(horizontal = 28.dp)) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+            modifier = Modifier.fillMaxWidth().padding(top = 24.dp, bottom = 8.dp),
+        ) {
+            Text("Films & Séries", style = MaterialTheme.typography.headlineLarge)
+            Text("${shown.size} titres", color = OnyxMuted, style = MaterialTheme.typography.bodyLarge)
         }
+
+        LazyRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            contentPadding = PaddingValues(vertical = 8.dp),
+        ) {
+            item { CategoryChip("Toutes", category == null) { category = null } }
+            items(categories, key = { it }) { c -> CategoryChip(c, category == c) { category = c } }
+        }
+
+        LazyVerticalGrid(
+            columns = GridCells.Adaptive(140.dp),
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(vertical = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            items(shown, key = { it.id }) { v ->
+                MediaCard(
+                    title = v.name,
+                    subtitle = v.category ?: v.year,
+                    imageUrl = v.posterUrl,
+                    seed = v.id,
+                    width = 140.dp,
+                    aspectRatio = 2f / 3f,
+                    initials = v.name.take(1).uppercase(),
+                    progress = progressById[v.id],
+                    badge = if (v.id in favorites) "★" else null,
+                    onClick = { onPlay(v.toPlayTarget()) },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun CategoryChip(label: String, selected: Boolean, onClick: () -> Unit) {
+    Button(onClick = onClick) {
+        Text(
+            label,
+            color = if (selected) OnyxCyan else MaterialTheme.colorScheme.onSurface,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }

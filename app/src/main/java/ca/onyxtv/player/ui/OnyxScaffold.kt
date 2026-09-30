@@ -40,6 +40,7 @@ import androidx.tv.material3.Text
 import ca.onyxtv.player.R
 import ca.onyxtv.player.player.PlayTarget
 import ca.onyxtv.player.player.PlayerScreen
+import ca.onyxtv.player.ui.components.toPlayTarget
 import ca.onyxtv.player.ui.dvr.DvrScreen
 import ca.onyxtv.player.ui.home.HomeScreen
 import ca.onyxtv.player.ui.live.LiveTvScreen
@@ -128,7 +129,13 @@ fun OnyxRoot(vm: OnyxViewModel = viewModel()) {
         }
 
         playing?.let { target ->
-            PlayerScreen(target = target, onExit = { playing = null })
+            PlayerScreen(
+                target = target,
+                onExit = { playing = null },
+                onProgress = vm::onPlaybackProgress,
+                zap = { delta -> vm.neighborChannel(target.id, delta)?.toPlayTarget() },
+                onSwitch = { playing = it },
+            )
         }
     }
 }
