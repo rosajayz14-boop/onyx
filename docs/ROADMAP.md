@@ -1,46 +1,55 @@
 # Feuille de route — ONYX TV
 
-Ce fichier distingue ce qui est **livré** de ce qui reste à **brancher**. Le socle
-(lecture, sources M3U/Xtream, EPG, navigation TV) est fonctionnel ; les points ci-dessous
-sont les prochaines étapes pour dépasser les lecteurs existants.
+Ce fichier distingue ce qui est **livré** de ce qui reste **à faire**.
 
-## Livré (v0.1)
+## Livré (v1.0)
+
+### Socle
 - Navigation télécommande (rail latéral déployable).
-- Chaînes en direct depuis **M3U** et **Xtream Codes**.
+- Chaînes en direct depuis **M3U** et **Xtream Codes**, avec **noms de catégories** (plus d'IDs).
 - Guide **EPG** now/next (Xtream `short_epg` + XMLTV pour M3U).
-- **VOD** (films/séries Xtream) en grille d'affiches.
-- **Recherche** chaînes + contenus.
-- **Lecteur** Media3/ExoPlayer plein écran (HLS/DASH/TS/MP4).
-- **Réglages** : ajout/suppression de sources, persistance locale (DataStore).
-- Écrans **Mosaïque** et **DVR** (structure + point d'entrée).
+- **Lecteur** Media3/ExoPlayer plein écran (HLS/DASH/TS/MP4) : indicateur de chargement,
+  écran d'erreur avec « Réessayer », **reprise** à la dernière position, **zapping** ↑/↓ et CH±.
+- **Réglages** : ajout/suppression de sources, **test de connexion** avec message explicite,
+  auto-correction de l'URL serveur (`http://`), persistance locale (DataStore).
+- États **chargement / vide / erreur** sur tous les écrans (plus d'échec silencieux).
 
-## À brancher (prochaines itérations)
+### Contenus
+- **Films** : catégories, compteur, badge favori, progression de reprise.
+- **Séries** : catalogue `get_series`, fiche `get_series_info` (saisons/épisodes, parsing
+  tolérant), « Reprendre SxEy », lecture d'épisode avec reprise.
+- **Recherche** : chaînes + films + séries (une série ouvre sa fiche).
+- **Favoris** (chaînes, films, séries) et **récents** avec reprise ; rangées dédiées à l'accueil.
+- **Recommandations** : heuristique locale (catégories aimées, notes, contenus déjà vus écartés).
+
+### Fonctions avancées
+- **Mosaïque** : 4 chaînes lues **simultanément** (un ExoPlayer par tuile), son sur la tuile
+  focalisée, OK = plein écran, repli visuel si un flux échoue.
+- **DVR** : service de premier plan capturant le flux vers le stockage privé de l'app,
+  liste persistée, lecture / arrêt / suppression, clôture des enregistrements interrompus.
+- **Rattrapage (catch-up)** : détection `tv_archive` Xtream, URL timeshift, « ↺ Revoir ».
+- **Contrôle parental** : PIN 4 chiffres, catégories verrouillées (masquées partout, PIN
+  demandé dans TV en direct), verrouillage de l'application au démarrage.
+
+## À faire (prochaines itérations)
 
 ### Priorité haute
-- **Favoris & récents** : table locale (Room) + rangées « Reprendre » / « Favoris ».
-- **Reprise de lecture** : mémoriser la position par contenu.
-- **Séries** : épisodes/saisons Xtream (`get_series_info`) + navigation dédiée.
-- **EPG plein écran** : grille temporelle complète (au-delà du now/next).
+- **EPG plein écran** : grille temporelle multi-chaînes (au-delà du now/next).
+- **Programmation d'enregistrement** depuis l'EPG (démarrage/arrêt à l'heure du programme).
+- **Tests unitaires** : `M3uParser`, `XtreamClient` (dont parsing des séries), `XmltvParser`.
 
 ### Priorité moyenne
-- **Mosaïque réelle** : un `ExoPlayer` par tuile (2×2), gestion mémoire/décodeurs,
-  bascule audio sur la tuile focalisée.
-- **DVR** : service de fond capturant le flux vers le stockage + gestion de l'espace ;
-  intégration catch-up des fournisseurs.
-- **Recommandations « IA »** : reco basée sur l'historique (heuristique locale, puis
-  modèle si souhaité).
-- **Contrôle parental** : PIN, profils avec restrictions (déjà prévu dans la maquette).
-
-### Confort / finition
-- **Marque** : intégrer une police téléchargeable (ex. Sora) via
-  `androidx.compose.ui.text.googlefonts` ; bannière/icône PNG haute définition.
-- **Chaînes Live TV Channels** (intégration à la rangée système Android TV).
+- **Chaînes Live TV Channels** (rangée système Android TV / Google TV).
 - **Multi-listes** : fusion/étiquetage, tri par numéro (LCN), groupes repliables.
 - **Réglages réseau** : buffer configurable, user-agent, `network security config`.
-- **Tests** : unitaires pour `M3uParser` / `XtreamClient` / `XmltvParser`.
+- **Profils** utilisateurs (favoris/récents séparés).
 
-## Idées différenciantes (inspirées du marché, à notre sauce)
+### Confort / finition
+- **Marque** : police téléchargeable (ex. Sora) via `androidx.compose.ui.text.googlefonts` ;
+  bannière/icône PNG haute définition ; écran de démarrage animé.
+- **Sous-titres / pistes audio** : sélecteur dans le lecteur.
+- **Synchronisation multi-appareils** du profil via un petit backend.
+
+## Idées différenciantes
 - Aperçu vidéo au survol dans le guide.
-- « Zapping » latéral pendant la lecture (déjà maquetté).
-- Mode « une seule télécommande » optimisé (raccourcis chiffres → numéro de chaîne).
-- Synchronisation multi-appareils du profil (favoris, reprise) via un petit backend.
+- Mode « une seule télécommande » optimisé (chiffres → numéro de chaîne).
