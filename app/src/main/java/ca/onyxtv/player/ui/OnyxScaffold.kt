@@ -32,7 +32,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.foundation.focusGroup
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
-import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.input.InputMode
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.onPreviewKeyEvent
@@ -222,7 +221,9 @@ fun OnyxRoot(vm: OnyxViewModel = viewModel()) {
                 Modifier
                     .fillMaxSize()
                     .focusRequester(contentFocus)
-                    .focusRestorer()
+                    // focusRestorer() volontairement absent : bug Compose 1.7 avec les listes
+                    // (« Release should only be called once » → plantage). Le focus va au premier
+                    // élément de la page, ce qui suffit.
                     .focusGroup()
             ) {
                 when (dest) {
