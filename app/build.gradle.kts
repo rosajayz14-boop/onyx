@@ -91,6 +91,13 @@ android {
 
 kotlin {
     jvmToolchain(17)
+    compilerOptions {
+        // API Compose/serialization marquées expérimentales mais stables en pratique
+        // (mode de saisie télécommande, restauration de focus, décodage JSON en flux).
+        optIn.add("androidx.compose.ui.ExperimentalComposeUiApi")
+        optIn.add("kotlinx.serialization.ExperimentalSerializationApi")
+        optIn.add("kotlinx.coroutines.FlowPreview")
+    }
 }
 
 dependencies {
