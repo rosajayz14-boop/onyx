@@ -20,6 +20,8 @@ import androidx.compose.material.icons.rounded.Movie
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import kotlinx.coroutines.delay
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -53,6 +55,7 @@ import ca.onyxtv.player.ui.series.SeriesScreen
 import ca.onyxtv.player.ui.settings.SettingsScreen
 import ca.onyxtv.player.ui.theme.OnyxBg
 import ca.onyxtv.player.ui.theme.OnyxBg2
+import ca.onyxtv.player.ui.theme.OnyxMuted
 import ca.onyxtv.player.ui.vod.VodScreen
 import ca.onyxtv.player.viewmodel.OnyxViewModel
 
@@ -145,6 +148,18 @@ fun OnyxRoot(vm: OnyxViewModel = viewModel()) {
                     Dest.SEARCH -> SearchScreen(vm, onPlay = { playing = it }, onOpenSeries = { openSeries = it })
                 }
             }
+        }
+
+        // Horloge discrète (mise à jour chaque 30 s), masquée pendant la lecture.
+        if (playing == null) {
+            var now by remember { mutableStateOf(System.currentTimeMillis()) }
+            LaunchedEffect(Unit) { while (true) { now = System.currentTimeMillis(); delay(30_000) } }
+            Text(
+                java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date(now)),
+                style = MaterialTheme.typography.titleMedium,
+                color = OnyxMuted,
+                modifier = Modifier.align(Alignment.TopEnd).padding(top = 18.dp, end = 28.dp),
+            )
         }
 
         // Fiche série par-dessus la navigation ; le lecteur reste au-dessus de tout.

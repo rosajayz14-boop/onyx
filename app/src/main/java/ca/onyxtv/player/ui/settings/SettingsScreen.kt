@@ -37,7 +37,11 @@ import ca.onyxtv.player.ui.theme.OnyxCyan
 import ca.onyxtv.player.ui.theme.OnyxLive
 import ca.onyxtv.player.ui.theme.OnyxMuted
 import ca.onyxtv.player.ui.theme.OnyxSurface
+import ca.onyxtv.player.viewmodel.OnyxUiState
 import ca.onyxtv.player.viewmodel.OnyxViewModel
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 @Composable
 fun SettingsScreen(vm: OnyxViewModel) {
@@ -70,6 +74,7 @@ fun SettingsScreen(vm: OnyxViewModel) {
                 )
             }
         }
+        item { UpdateCard(vm, state) }
         item { Text("Sources configurées", style = MaterialTheme.typography.titleLarge) }
 
         if (sources.isEmpty()) {
@@ -235,5 +240,53 @@ private fun ParentalCard(vm: OnyxViewModel, enabled: Boolean, lockAtStart: Boole
                 }
             }
         }
+    }
+}
+
+private fun relative(ts: Long): String {
+    if (ts <= 0) return "jamais"
+    val m = (System.currentTimeMillis() - ts) / 60_000
+    return when {
+        m < 1 -> "à l'instant"
+        m < 60 -> "il y a $m min"
+        m < 48 * 60 -> "il y a ${m / 60} h"
+        else -> SimpleDateFormat("dd/MM à HH:mm", Locale.getDefault()).format(Date(ts))
+    }
+}
+
+/** Mise à jour du catalogue et du guide, avec bilan par source. */
+@Composable
+private fun UpdateCard(vm: OnyxViewModel, state: OnyxUiState) {
+    var epgNote by remember { mutableStateOf<String?>(null) }
+    FormCard("Mise à jour des données") {
+        Text(
+            if (state.loading) "Mise à jour en cours… ${state.progress ?: ""}"
+            else "Dernière mise à jour : ${relative(state.updatedAt)} · " +
+                "${state.channels.size} chaînes · ${state.vod.count { it.kind == ca.onyxtv.player.core.model.MediaKind.MOVIE }} films · " +
+                "${state.vod.count { it.kind == ca.onyxtv.player.core.model.MediaKind.SERIES }} séries",
+            color = if (state.loading) OnyxCyan else OnyxMuted,
+            style = MaterialTheme.typography.bodyLarge,
+        )
+        state.reports.forEach { r ->
+            Text(
+                "${r.label} (${r.type}) — ${r.channels} chaînes · ${r.movies} films · ${r.series} séries" +
+                    (r.error?.let { "\n⚠ $it" } ?: ""),
+                color = if (r.error != null) OnyxLive else OnyxMuted,
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.padding(top = 6.dp),
+            )
+        }
+        Spacer(Modifier.height(10.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Button(onClick = { vm.refresh() }) { Text(if (state.loading) "Mise à jour…" else "🔄 Tout mettre à jour") }
+            Button(onClick = { vm.refreshEpg(); epgNote = "Guide vidé : il sera retéléchargé à l'affichage des chaînes." }) {
+                Text("🗓 Mettre à jour le guide (EPG)")
+            }
+        }
+        epgNote?.let { Text(it, color = OnyxCyan, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 8.dp)) }
+        Text(
+            "Le catalogue est rafraîchi automatiquement à l'ouverture s'il date de plus de 6 h ; le guide est mis en cache 30 min.",
+            color = OnyxMuted, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 8.dp),
+        )
     }
 }

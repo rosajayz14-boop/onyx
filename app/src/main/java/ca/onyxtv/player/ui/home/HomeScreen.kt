@@ -69,10 +69,11 @@ fun HomeScreen(
     }
     if (channels.isEmpty() && vod.isEmpty()) {
         Column(Modifier.fillMaxSize()) {
-            state.error?.let { ErrorBanner(it, Modifier.padding(24.dp)) }
+            (state.error ?: state.sourceErrors.takeIf { it.isNotEmpty() }?.joinToString("\n"))?.let { ErrorBanner(it, Modifier.padding(24.dp)) }
             EmptyState(
                 title = "Bienvenue sur ONYX TV",
-                hint = "Ajoutez une liste M3U ou un compte Xtream dans Réglages pour commencer.",
+                hint = if (state.reports.isEmpty()) "Ajoutez une liste M3U ou un compte Xtream dans Réglages pour commencer."
+                       else "Aucun contenu n'a pu être chargé. Réglages → « Tout mettre à jour » pour réessayer.",
             )
         }
         return
@@ -112,8 +113,23 @@ fun HomeScreen(
             .padding(start = 28.dp, end = 36.dp),
         contentPadding = PaddingValues(top = 28.dp, bottom = 36.dp),
     ) {
-        state.error?.let { err ->
-            item { ErrorBanner(err, Modifier.padding(bottom = 12.dp)) }
+        if (state.loading && state.hasContent) {
+            item {
+                Text(
+                    "Mise à jour en cours… ${state.progress ?: ""}",
+                    color = OnyxMuted,
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.padding(bottom = 10.dp),
+                )
+            }
+        }
+        if (state.sourceErrors.isNotEmpty() && !state.loading) {
+            item {
+                Column(Modifier.padding(bottom = 12.dp)) {
+                    ErrorBanner(state.sourceErrors.joinToString("\n"))
+                    Button(onClick = { vm.refresh() }, modifier = Modifier.padding(top = 8.dp)) { Text("Réessayer la mise à jour") }
+                }
+            }
         }
         item {
             Hero(

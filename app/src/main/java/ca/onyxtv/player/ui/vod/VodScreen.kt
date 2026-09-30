@@ -58,7 +58,8 @@ fun VodScreen(
     if (vod.isEmpty()) {
         EmptyState(
             title = "Aucun film ou série",
-            hint = "Les contenus à la demande proviennent des comptes Xtream. Ajoutez-en un dans Réglages.",
+            hint = state.sourceErrors.takeIf { it.isNotEmpty() }?.joinToString("\n")
+                ?: "Les contenus à la demande proviennent des comptes Xtream. Ajoutez-en un dans Réglages, ou « Tout mettre à jour ».",
         )
         return
     }
@@ -97,7 +98,8 @@ fun VodScreen(
         if (shown.isEmpty()) {
             EmptyState(
                 title = if (kind == MediaKind.SERIES) "Aucune série" else "Aucun film",
-                hint = "Ce compte ne propose pas ce type de contenu dans cette catégorie.",
+                hint = state.sourceErrors.takeIf { it.isNotEmpty() }?.joinToString("\n")
+                    ?: "Ce compte ne propose pas ce type de contenu dans cette catégorie. Réglages → « Tout mettre à jour » pour recharger.",
             )
             return
         }

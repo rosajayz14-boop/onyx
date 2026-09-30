@@ -15,6 +15,7 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.decodeFromJsonElement
 import java.net.URLEncoder
 
 /**
@@ -228,9 +229,20 @@ class XtreamClient(
         String(Base64.decode(s, Base64.DEFAULT))
     }.getOrDefault(s)
 
+    /**
+     * Décode une liste élément par élément : un seul enregistrement mal formé (champ d'un
+     * type inattendu, panneau exotique) est ignoré au lieu de faire disparaître tout le
+     * catalogue. Une réponse qui n'est pas un tableau (ex. erreur d'auth en objet) lève.
+     */
     private suspend inline fun <reified T> getList(url: String): List<T> {
         val body = Http.get(url)
-        return runCatching { json.decodeFromString<List<T>>(body) }.getOrDefault(emptyList())
+        val root = runCatching { json.parseToJsonElement(body) }
+            .getOrElse { throw IllegalStateException("réponse illisible du serveur") }
+        val array = root as? JsonArray
+            ?: throw IllegalStateException(
+                if (root is JsonObject && root.containsKey("user_info")) "identifiants refusés" else "réponse inattendue du serveur"
+            )
+        return array.mapNotNull { el -> runCatching { json.decodeFromJsonElement<T>(el) }.getOrNull() }
     }
 
     private suspend inline fun <reified T> getOne(url: String): T =

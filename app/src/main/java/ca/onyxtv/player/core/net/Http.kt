@@ -5,23 +5,28 @@ import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.IOException
+import java.net.SocketTimeoutException
+import java.net.UnknownHostException
 import java.util.concurrent.TimeUnit
 
 /** Petit client HTTP partagé (OkHttp) pour M3U, Xtream et XMLTV. */
 object Http {
 
+    // Les catalogues Xtream (films/séries) pèsent souvent plusieurs Mo et les serveurs sont
+    // lents : on laisse largement le temps de répondre plutôt que d'échouer en silence.
     val client: OkHttpClient = OkHttpClient.Builder()
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(30, TimeUnit.SECONDS)
+        .connectTimeout(20, TimeUnit.SECONDS)
+        .readTimeout(120, TimeUnit.SECONDS)
+        .callTimeout(240, TimeUnit.SECONDS)
         .retryOnConnectionFailure(true)
         .build()
 
-    private const val UA = "ONYX-TV/0.1 (Android TV)"
+    private const val UA = "ONYX-TV/1.0 (Android TV)"
 
     suspend fun get(url: String): String = withContext(Dispatchers.IO) {
         val request = Request.Builder().url(url).header("User-Agent", UA).build()
         client.newCall(request).execute().use { resp ->
-            if (!resp.isSuccessful) throw IOException("HTTP ${resp.code} — $url")
+            if (!resp.isSuccessful) throw IOException("HTTP ${resp.code}")
             resp.body?.string().orEmpty()
         }
     }
@@ -29,8 +34,16 @@ object Http {
     suspend fun getBytes(url: String): ByteArray = withContext(Dispatchers.IO) {
         val request = Request.Builder().url(url).header("User-Agent", UA).build()
         client.newCall(request).execute().use { resp ->
-            if (!resp.isSuccessful) throw IOException("HTTP ${resp.code} — $url")
+            if (!resp.isSuccessful) throw IOException("HTTP ${resp.code}")
             resp.body?.bytes() ?: ByteArray(0)
         }
+    }
+
+    /** Message lisible pour l'utilisateur à partir d'une exception réseau. */
+    fun describe(e: Throwable): String = when (e) {
+        is SocketTimeoutException -> "délai dépassé (serveur lent ou catalogue très volumineux)"
+        is UnknownHostException -> "serveur introuvable (vérifiez l'adresse)"
+        is IOException -> e.message ?: "erreur réseau"
+        else -> e.message ?: e.javaClass.simpleName
     }
 }

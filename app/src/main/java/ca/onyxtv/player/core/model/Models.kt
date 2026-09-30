@@ -1,5 +1,7 @@
 package ca.onyxtv.player.core.model
 
+import kotlinx.serialization.Serializable
+
 /** Type de média diffusé. */
 enum class MediaKind { LIVE, MOVIE, SERIES }
 
@@ -11,6 +13,7 @@ data class Category(
 )
 
 /** Une chaîne en direct (ou un flux jouable). */
+@Serializable
 data class Channel(
     val id: String,               // identifiant interne unique
     val streamId: String? = null, // id Xtream si applicable
@@ -26,6 +29,7 @@ data class Channel(
 )
 
 /** Un contenu à la demande (film ou série). Pour une série, [url] est vide et [seriesId] renseigné. */
+@Serializable
 data class VodItem(
     val id: String,
     val name: String,

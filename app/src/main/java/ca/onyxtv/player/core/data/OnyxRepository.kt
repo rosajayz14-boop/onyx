@@ -9,46 +9,135 @@ import ca.onyxtv.player.core.model.SeriesDetail
 import ca.onyxtv.player.core.model.VodItem
 import ca.onyxtv.player.core.net.Http
 import ca.onyxtv.player.core.xtream.XtreamClient
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.first
 
 /**
  * Dépôt central : agrège toutes les sources configurées en listes prêtes pour l'UI.
- * Réunit M3U (parsing local) et Xtream (API), plus l'EPG.
+ * Réunit M3U (parsing local) et Xtream (API), plus l'EPG (avec cache mémoire).
  */
 class OnyxRepository(
     val store: PlaylistStore,
     private val xt: XtreamClient = XtreamClient(),
 ) {
 
-    /** Toutes les chaînes en direct, toutes sources confondues. */
-    suspend fun channels(): List<Channel> {
-        val out = ArrayList<Channel>()
-        store.sources.first().forEach { source ->
-            when (source) {
-                is PlaylistSource.M3u -> out += runCatching {
-                    M3uParser.parse(Http.get(source.url))
-                }.getOrDefault(emptyList())
+    // ---- Catalogue ----
 
-                is PlaylistSource.Xtream -> out += runCatching {
-                    xt.liveStreams(source)
-                }.getOrDefault(emptyList())
+    /**
+     * Charge toutes les sources EN PARALLÈLE et renvoie un instantané complet avec un bilan
+     * par source (comptes et erreur éventuelle). Une source en échec n'empêche pas les autres.
+     * [onProgress] reçoit des messages d'avancement pour l'UI.
+     */
+    suspend fun loadCatalog(onProgress: (String) -> Unit = {}): CatalogSnapshot = coroutineScope {
+        val sources = store.sources.first()
+        if (sources.isEmpty()) return@coroutineScope CatalogSnapshot(updatedAt = System.currentTimeMillis())
+
+        val jobs = sources.map { source ->
+            async {
+                val t0 = System.currentTimeMillis()
+                when (source) {
+                    is PlaylistSource.M3u -> {
+                        onProgress("Liste « ${source.label} »…")
+                        runCatching { M3uParser.parse(Http.get(source.url)) }
+                            .fold(
+                                onSuccess = { ch ->
+                                    Triple(ch, emptyList<VodItem>(), SourceReport(source.id, source.label, "M3U", channels = ch.size, durationMs = System.currentTimeMillis() - t0))
+                                },
+                                onFailure = { e ->
+                                    Triple(emptyList<Channel>(), emptyList<VodItem>(), SourceReport(source.id, source.label, "M3U", error = Http.describe(e), durationMs = System.currentTimeMillis() - t0))
+                                },
+                            )
+                    }
+                    is PlaylistSource.Xtream -> {
+                        onProgress("Compte « ${source.label} » : chaînes…")
+                        val live = async { runCatching { xt.liveStreams(source) } }
+                        val movies = async { onProgress("Compte « ${source.label} » : films…"); runCatching { xt.vodStreams(source) } }
+                        val series = async { onProgress("Compte « ${source.label} » : séries…"); runCatching { xt.series(source) } }
+                        val ch = live.await().getOrDefault(emptyList())
+                        val mv = movies.await().getOrDefault(emptyList())
+                        val sr = series.await().getOrDefault(emptyList())
+                        val errors = listOfNotNull(
+                            live.await().exceptionOrNull()?.let { "chaînes : ${Http.describe(it)}" },
+                            movies.await().exceptionOrNull()?.let { "films : ${Http.describe(it)}" },
+                            series.await().exceptionOrNull()?.let { "séries : ${Http.describe(it)}" },
+                        )
+                        Triple(
+                            ch, mv + sr,
+                            SourceReport(
+                                source.id, source.label, "Xtream",
+                                channels = ch.size, movies = mv.size, series = sr.size,
+                                error = errors.takeIf { it.isNotEmpty() }?.joinToString(" · "),
+                                durationMs = System.currentTimeMillis() - t0,
+                            ),
+                        )
+                    }
+                }
             }
         }
-        return out
+        val results = jobs.map { it.await() }
+        CatalogSnapshot(
+            channels = results.flatMap { it.first },
+            vod = results.flatMap { it.second },
+            reports = results.map { it.third },
+            updatedAt = System.currentTimeMillis(),
+        )
     }
 
     /** Teste un compte Xtream et renvoie un message d'état lisible. */
     suspend fun probeXtream(src: PlaylistSource.Xtream): String = xt.probe(src)
 
-    /** Contenus VOD : films + séries des comptes Xtream (une M3U mélange souvent tout). */
-    suspend fun vod(): List<VodItem> {
-        val out = ArrayList<VodItem>()
-        store.sources.first().filterIsInstance<PlaylistSource.Xtream>().forEach { source ->
-            out += runCatching { xt.vodStreams(source) }.getOrDefault(emptyList())
-            out += runCatching { xt.series(source) }.getOrDefault(emptyList())
-        }
-        return out
+    // ---- EPG (cache mémoire) ----
+
+    private data class Cached<T>(val at: Long, val value: T)
+    private val epgByChannel = HashMap<String, Cached<List<EpgProgram>>>()
+    private val xmltvByUrl = HashMap<String, Cached<List<EpgProgram>>>()
+
+    /** Vide les caches EPG : le prochain affichage retélécharge le guide. */
+    fun clearEpg() {
+        synchronized(epgByChannel) { epgByChannel.clear() }
+        synchronized(xmltvByUrl) { xmltvByUrl.clear() }
     }
+
+    /** Guide (now/next) pour une chaîne. Xtream via short_epg ; M3U via XMLTV. Mis en cache. */
+    suspend fun epg(channel: Channel): List<EpgProgram> {
+        val now = System.currentTimeMillis()
+        synchronized(epgByChannel) { epgByChannel[channel.id] }
+            ?.takeIf { now - it.at < EPG_TTL_MS }
+            ?.let { return it.value }
+
+        val sources = store.sources.first()
+        val result: List<EpgProgram> = run {
+            // Xtream : EPG court par stream_id, sur la source de la chaîne
+            channel.streamId?.let { sid ->
+                val sourceId = channel.id.split(":").getOrNull(1)
+                sources.filterIsInstance<PlaylistSource.Xtream>()
+                    .firstOrNull { it.id == sourceId }
+                    ?.let { src -> return@run runCatching { xt.shortEpg(src, sid) }.getOrDefault(emptyList()) }
+            }
+            // M3U : XMLTV téléchargé une fois (cache), filtré sur le tvg-id
+            val epgId = channel.epgChannelId ?: return@run emptyList()
+            val m3u = sources.filterIsInstance<PlaylistSource.M3u>().firstOrNull { !it.epgUrl.isNullOrBlank() }
+                ?: return@run emptyList()
+            xmltv(m3u.epgUrl!!).filter { it.channelId == epgId }
+        }
+        synchronized(epgByChannel) { epgByChannel[channel.id] = Cached(now, result) }
+        return result
+    }
+
+    private suspend fun xmltv(url: String): List<EpgProgram> {
+        val now = System.currentTimeMillis()
+        synchronized(xmltvByUrl) { xmltvByUrl[url] }
+            ?.takeIf { now - it.at < XMLTV_TTL_MS }
+            ?.let { return it.value }
+        val parsed = runCatching {
+            Http.getBytes(url).inputStream().use { XmltvParser.parse(it) }
+        }.getOrDefault(emptyList())
+        synchronized(xmltvByUrl) { xmltvByUrl[url] = Cached(now, parsed) }
+        return parsed
+    }
+
+    // ---- Rattrapage / séries ----
 
     /**
      * URL de rattrapage d'un programme déjà diffusé (Xtream timeshift), ou null si la chaîne
@@ -77,24 +166,8 @@ class OnyxRepository(
         return xt.seriesInfo(src, seriesId, item.name)
     }
 
-    /** Guide (now/next) pour une chaîne. Xtream via short_epg ; M3U via XMLTV. */
-    suspend fun epg(channel: Channel): List<EpgProgram> {
-        val sources = store.sources.first()
-
-        // Xtream : EPG court par stream_id
-        channel.streamId?.let { sid ->
-            sources.filterIsInstance<PlaylistSource.Xtream>().firstOrNull()?.let { src ->
-                return runCatching { xt.shortEpg(src, sid) }.getOrDefault(emptyList())
-            }
-        }
-
-        // M3U : télécharger et filtrer le XMLTV sur le tvg-id
-        val epgId = channel.epgChannelId ?: return emptyList()
-        val m3u = sources.filterIsInstance<PlaylistSource.M3u>().firstOrNull { !it.epgUrl.isNullOrBlank() }
-            ?: return emptyList()
-        return runCatching {
-            Http.getBytes(m3u.epgUrl!!).inputStream().use { XmltvParser.parse(it) }
-                .filter { it.channelId == epgId }
-        }.getOrDefault(emptyList())
+    private companion object {
+        const val EPG_TTL_MS = 30 * 60_000L        // now/next Xtream : 30 min
+        const val XMLTV_TTL_MS = 6 * 3_600_000L    // fichier XMLTV : 6 h
     }
 }

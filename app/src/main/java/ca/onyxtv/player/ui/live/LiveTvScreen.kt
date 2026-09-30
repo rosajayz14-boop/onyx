@@ -174,6 +174,7 @@ fun LiveTvScreen(vm: OnyxViewModel, onPlay: (PlayTarget) -> Unit) {
                 EpgPanel(
                     vm = vm,
                     channel = ch,
+                    epgVersion = state.epgVersion,
                     isFavorite = ch.id in favorites,
                     onToggleFavorite = { vm.toggleFavorite(ch.id) },
                     onPlay = onPlay,
@@ -211,12 +212,13 @@ private fun GroupItem(name: String, count: Int, selected: Boolean, onClick: () -
 private fun EpgPanel(
     vm: OnyxViewModel,
     channel: Channel,
+    epgVersion: Int,
     isFavorite: Boolean,
     onToggleFavorite: () -> Unit,
     onPlay: (PlayTarget) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
-    val programs by produceState(initialValue = emptyList<EpgProgram>(), channel.id) {
+    val programs by produceState(initialValue = emptyList<EpgProgram>(), channel.id, epgVersion) {
         value = runCatching { vm.epgFor(channel) }.getOrDefault(emptyList())
     }
     val now = System.currentTimeMillis()
