@@ -247,8 +247,19 @@ private fun EpgPanel(
             color = OnyxMuted,
             style = MaterialTheme.typography.bodyMedium,
         )
-        current?.let {
-            Text("● EN DIRECT · ${it.title}", color = OnyxLive, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        current?.let { p ->
+            Text("● EN DIRECT · ${p.title}", color = OnyxLive, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Box(
+                Modifier
+                    .fillMaxWidth(0.7f)
+                    .padding(top = 6.dp)
+                    .height(4.dp)
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(OnyxSurfaceHi)
+            ) {
+                Box(Modifier.fillMaxHeight().fillMaxWidth(p.progressAt(now)).background(OnyxCyan))
+            }
+            Text("${fmt(p.start)} – ${fmt(p.stop)}", color = OnyxMuted, style = MaterialTheme.typography.bodyMedium)
         }
 
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(top = 14.dp, bottom = 6.dp)) {

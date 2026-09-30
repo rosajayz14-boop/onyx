@@ -52,7 +52,11 @@ En plus de `tv-latest` (toujours la dernière), vous pouvez publier des **versio
 Il suffit de pousser un **tag** `vX.Y.Z` : la CI crée une Release dédiée et fixe le
 `versionName` de l'app sur ce numéro.
 
-**Deux façons de cadencer une version :**
+**Trois façons de cadencer une version :**
+
+- **Par le fichier `VERSION`** (recommandé, marche depuis n'importe où) : mettez le numéro
+  voulu dans `VERSION` (ex. `1.0.1`) et poussez. La CI crée la Release **figée** `v1.0.1`
+  si elle n'existe pas encore ; une Release déjà publiée n'est **jamais** modifiée.
 
 - **Par tag Git** (depuis votre machine) :
   ```bash

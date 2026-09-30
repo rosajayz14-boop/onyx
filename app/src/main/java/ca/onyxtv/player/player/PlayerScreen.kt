@@ -11,15 +11,20 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -37,12 +42,15 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.TrackSelectionOverride
+import androidx.media3.common.Tracks
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.AspectRatioFrameLayout
@@ -69,12 +77,37 @@ data class PlayTarget(
     val startPositionMs: Long = 0L,
 )
 
+/** Une piste (audio ou sous-titre) sélectionnable. */
+private data class TrackOption(val group: Tracks.Group, val index: Int, val label: String, val selected: Boolean)
+
+private fun trackOptions(tracks: Tracks, type: Int): List<TrackOption> =
+    tracks.groups.filter { it.type == type }.flatMap { g ->
+        (0 until g.length).filter { g.isTrackSupported(it) }.map { i ->
+            val f = g.getTrackFormat(i)
+            val parts = listOfNotNull(
+                f.label,
+                f.language?.uppercase(),
+                if (type == C.TRACK_TYPE_AUDIO && f.channelCount > 0) "${f.channelCount} canaux" else null,
+            ).distinct()
+            TrackOption(g, i, parts.ifEmpty { listOf("Piste ${i + 1}") }.joinToString(" · "), g.isTrackSelected(i))
+        }
+    }
+
+private val DIGIT_KEYS = mapOf(
+    Key.Zero to '0', Key.One to '1', Key.Two to '2', Key.Three to '3', Key.Four to '4',
+    Key.Five to '5', Key.Six to '6', Key.Seven to '7', Key.Eight to '8', Key.Nine to '9',
+    Key.NumPad0 to '0', Key.NumPad1 to '1', Key.NumPad2 to '2', Key.NumPad3 to '3', Key.NumPad4 to '4',
+    Key.NumPad5 to '5', Key.NumPad6 to '6', Key.NumPad7 to '7', Key.NumPad8 to '8', Key.NumPad9 to '9',
+)
+
 /**
  * Lecteur plein écran basé sur Media3/ExoPlayer.
  * - HLS, DASH et flux progressifs (TS/MP4).
  * - Indicateur de chargement, écran d'erreur avec « Réessayer ».
  * - Reprise à la dernière position et remontée périodique de la progression.
- * - Zapping en direct : ↑/↓ ou CH+/CH− changent de chaîne.
+ * - Zapping en direct : ↑/↓ ou CH+/CH− ; saisie d'un numéro de chaîne au pavé numérique.
+ * - Touche Menu (≡) : pistes audio, sous-titres, format d'image.
+ * - Bandeau avec le programme en cours (EPG) pour le direct.
  */
 @OptIn(UnstableApi::class)
 @Composable
@@ -85,18 +118,29 @@ fun PlayerScreen(
     /** Renvoie la chaîne voisine (+1 / −1) en mode direct, null si indisponible. */
     zap: ((Int) -> PlayTarget?)? = null,
     onSwitch: (PlayTarget) -> Unit = {},
+    /** Renvoie la chaîne portant ce numéro (saisie au pavé numérique). */
+    zapToNumber: ((Int) -> PlayTarget?)? = null,
+    /** Titre du programme en cours (EPG) pour le direct. */
+    nowPlaying: (suspend (PlayTarget) -> String?)? = null,
 ) {
     val context = LocalContext.current
     val exo = remember { ExoPlayer.Builder(context).build().apply { playWhenReady = true } }
     val focus = remember { FocusRequester() }
+    val panelFocus = remember { FocusRequester() }
 
     var buffering by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
     var showInfo by remember { mutableStateOf(true) }
+    var epgLine by remember { mutableStateOf<String?>(null) }
+    var panelOpen by remember { mutableStateOf(false) }
+    var tracks by remember { mutableStateOf(Tracks.EMPTY) }
+    var resize by remember { mutableIntStateOf(AspectRatioFrameLayout.RESIZE_MODE_FIT) }
+    var digits by remember { mutableStateOf("") }
 
     val currentTarget by rememberUpdatedState(target)
     val currentOnProgress by rememberUpdatedState(onProgress)
     val currentZap by rememberUpdatedState(zap)
+    val currentZapToNumber by rememberUpdatedState(zapToNumber)
     val currentOnSwitch by rememberUpdatedState(onSwitch)
 
     fun doZap(delta: Int): Boolean {
@@ -115,6 +159,20 @@ fun PlayerScreen(
         exo.play()
     }
 
+    fun selectTrack(o: TrackOption, type: Int) {
+        exo.trackSelectionParameters = exo.trackSelectionParameters.buildUpon()
+            .setTrackTypeDisabled(type, false)
+            .setOverrideForType(TrackSelectionOverride(o.group.mediaTrackGroup, o.index))
+            .build()
+    }
+
+    fun disableSubtitles() {
+        exo.trackSelectionParameters = exo.trackSelectionParameters.buildUpon()
+            .clearOverridesOfType(C.TRACK_TYPE_TEXT)
+            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+            .build()
+    }
+
     // Cycle de vie du lecteur : un seul ExoPlayer pour toute la durée de l'écran (zapping inclus).
     DisposableEffect(exo) {
         val listener = object : Player.Listener {
@@ -124,6 +182,7 @@ fun PlayerScreen(
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 if (isPlaying) error = null
             }
+            override fun onTracksChanged(t: Tracks) { tracks = t }
             override fun onPlayerError(e: PlaybackException) {
                 buffering = false
                 error = when (e.errorCode) {
@@ -134,7 +193,7 @@ fun PlayerScreen(
                         "Le serveur a refusé le flux (accès expiré ou chaîne indisponible)."
                     PlaybackException.ERROR_CODE_PARSING_CONTAINER_MALFORMED,
                     PlaybackException.ERROR_CODE_PARSING_MANIFEST_MALFORMED ->
-                        "Format de flux non reconnu."
+                        "Format de flux non reconnu (essayez l'autre format TS/HLS dans Réglages)."
                     PlaybackException.ERROR_CODE_DECODER_INIT_FAILED,
                     PlaybackException.ERROR_CODE_DECODING_FAILED ->
                         "Ce boîtier ne peut pas décoder ce flux."
@@ -152,9 +211,25 @@ fun PlayerScreen(
     // (Re)chargement à chaque changement de cible, avec bandeau d'info temporaire.
     LaunchedEffect(target.url) {
         load()
+        panelOpen = false
         showInfo = true
-        delay(4_000)
+        delay(5_000)
         showInfo = false
+    }
+
+    // Programme en cours (EPG) pour le direct.
+    LaunchedEffect(target.url) {
+        epgLine = null
+        if (target.isLive) epgLine = runCatching { nowPlaying?.invoke(target) }.getOrNull()
+    }
+
+    // Saisie d'un numéro de chaîne : on zappe 1,5 s après le dernier chiffre.
+    LaunchedEffect(digits) {
+        if (digits.isEmpty()) return@LaunchedEffect
+        delay(1_500)
+        val n = digits.toIntOrNull()
+        digits = ""
+        if (n != null) currentZapToNumber?.invoke(n)?.let(currentOnSwitch)
     }
 
     // Remontée périodique de la progression (reprise / récents).
@@ -176,8 +251,9 @@ fun PlayerScreen(
     }
 
     LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
+    LaunchedEffect(panelOpen) { if (panelOpen) runCatching { panelFocus.requestFocus() } else runCatching { focus.requestFocus() } }
 
-    BackHandler(enabled = true) { onExit() }
+    BackHandler(enabled = true) { if (panelOpen) panelOpen = false else onExit() }
 
     Box(
         Modifier
@@ -187,9 +263,18 @@ fun PlayerScreen(
             .focusable()
             .onPreviewKeyEvent { ev ->
                 if (ev.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
-                when (ev.key) {
-                    Key.DirectionUp, Key.ChannelUp -> doZap(+1)
-                    Key.DirectionDown, Key.ChannelDown -> doZap(-1)
+                if (panelOpen) {
+                    return@onPreviewKeyEvent if (ev.key == Key.Menu) { panelOpen = false; true } else false
+                }
+                val digit = DIGIT_KEYS[ev.key]
+                when {
+                    ev.key == Key.Menu -> { panelOpen = true; true }
+                    digit != null && currentTarget.isLive && currentZapToNumber != null -> {
+                        if (digits.length < 4) digits += digit
+                        true
+                    }
+                    ev.key == Key.DirectionUp || ev.key == Key.ChannelUp -> doZap(+1)
+                    ev.key == Key.DirectionDown || ev.key == Key.ChannelDown -> doZap(-1)
                     else -> false
                 }
             }
@@ -203,24 +288,28 @@ fun PlayerScreen(
                     setShowNextButton(false)
                     setShowPreviousButton(false)
                     controllerShowTimeoutMs = 4000
-                    resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
+                    resizeMode = resize
                     // Repli : CH+/CH− arrivent ici même si Compose ne les intercepte pas.
                     setOnKeyListener { _, keyCode, event ->
                         if (event.action != KeyEvent.ACTION_DOWN) return@setOnKeyListener false
                         when (keyCode) {
                             KeyEvent.KEYCODE_CHANNEL_UP -> doZap(+1)
                             KeyEvent.KEYCODE_CHANNEL_DOWN -> doZap(-1)
+                            KeyEvent.KEYCODE_MENU -> { panelOpen = !panelOpen; true }
                             else -> false
                         }
                     }
                 }
             },
-            update = { view -> if (view.player !== exo) view.player = exo },
+            update = { view ->
+                if (view.player !== exo) view.player = exo
+                if (view.resizeMode != resize) view.resizeMode = resize
+            },
         )
 
-        // Bandeau d'information (titre / catégorie), masqué après quelques secondes.
+        // Bandeau d'information (titre / catégorie / programme en cours), masqué après quelques secondes.
         AnimatedVisibility(
-            visible = showInfo && error == null,
+            visible = showInfo && error == null && !panelOpen,
             enter = fadeIn(),
             exit = fadeOut(),
             modifier = Modifier.align(Alignment.TopStart),
@@ -238,14 +327,90 @@ fun PlayerScreen(
                     }
                 }
                 Text(target.title, style = MaterialTheme.typography.headlineMedium, color = Color.White)
-                if (target.isLive && zap != null) {
-                    Text("↑ ↓ pour changer de chaîne", style = MaterialTheme.typography.bodyMedium, color = OnyxMuted)
-                }
+                epgLine?.let { Text("En ce moment : $it", style = MaterialTheme.typography.bodyLarge, color = Color.White.copy(alpha = 0.85f)) }
+                Text(
+                    buildString {
+                        if (target.isLive && zap != null) append("↑ ↓ chaîne  ·  0-9 numéro  ·  ")
+                        append("Menu ≡ pistes & image")
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = OnyxMuted,
+                )
             }
+        }
+
+        // Numéro de chaîne en cours de saisie.
+        if (digits.isNotEmpty()) {
+            Text(
+                digits,
+                style = MaterialTheme.typography.displayLarge,
+                fontWeight = FontWeight.ExtraBold,
+                color = Color.White,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(28.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Color(0xB3000000))
+                    .padding(horizontal = 22.dp, vertical = 8.dp),
+            )
         }
 
         if (buffering && error == null) {
             CircularProgressIndicator(color = OnyxCyan, modifier = Modifier.align(Alignment.Center))
+        }
+
+        // Panneau Menu : pistes audio, sous-titres, format d'image.
+        if (panelOpen) {
+            val audio = remember(tracks) { trackOptions(tracks, C.TRACK_TYPE_AUDIO) }
+            val subs = remember(tracks) { trackOptions(tracks, C.TRACK_TYPE_TEXT) }
+            val subsDisabled = exo.trackSelectionParameters.disabledTrackTypes.contains(C.TRACK_TYPE_TEXT)
+            Column(
+                Modifier
+                    .align(Alignment.CenterEnd)
+                    .fillMaxHeight()
+                    .width(380.dp)
+                    .background(Color(0xF00B0C14))
+                    .padding(24.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text("Lecture", style = MaterialTheme.typography.headlineMedium, color = Color.White)
+
+                Text("Format d'image", style = MaterialTheme.typography.titleMedium, color = OnyxCyan, modifier = Modifier.padding(top = 8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf(
+                        AspectRatioFrameLayout.RESIZE_MODE_FIT to "Ajusté",
+                        AspectRatioFrameLayout.RESIZE_MODE_ZOOM to "Zoom",
+                        AspectRatioFrameLayout.RESIZE_MODE_FILL to "Étiré",
+                    ).forEachIndexed { idx, (mode, label) ->
+                        Button(
+                            onClick = { resize = mode },
+                            modifier = if (idx == 0) Modifier.focusRequester(panelFocus) else Modifier,
+                        ) { Text(if (resize == mode) "✓ $label" else label) }
+                    }
+                }
+
+                Text("Audio", style = MaterialTheme.typography.titleMedium, color = OnyxCyan, modifier = Modifier.padding(top = 8.dp))
+                if (audio.isEmpty()) Text("Aucune piste détectée", color = OnyxMuted)
+                audio.forEach { o ->
+                    Button(onClick = { selectTrack(o, C.TRACK_TYPE_AUDIO) }, modifier = Modifier.fillMaxWidth()) {
+                        Text(if (o.selected) "✓ ${o.label}" else o.label)
+                    }
+                }
+
+                Text("Sous-titres", style = MaterialTheme.typography.titleMedium, color = OnyxCyan, modifier = Modifier.padding(top = 8.dp))
+                Button(onClick = { disableSubtitles() }, modifier = Modifier.fillMaxWidth()) {
+                    Text(if (subsDisabled || subs.none { it.selected }) "✓ Désactivés" else "Désactivés")
+                }
+                if (subs.isEmpty()) Text("Aucun sous-titre dans ce flux", color = OnyxMuted)
+                subs.forEach { o ->
+                    Button(onClick = { selectTrack(o, C.TRACK_TYPE_TEXT) }, modifier = Modifier.fillMaxWidth()) {
+                        Text(if (o.selected && !subsDisabled) "✓ ${o.label}" else o.label)
+                    }
+                }
+
+                Text("Retour ou Menu pour fermer", color = OnyxMuted, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 12.dp))
+            }
         }
 
         error?.let { msg ->
@@ -262,6 +427,7 @@ fun PlayerScreen(
                 Text(msg, style = MaterialTheme.typography.bodyLarge, color = OnyxMuted)
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     Button(onClick = { load() }) { Text("Réessayer") }
+                    if (target.isLive && zap != null) Button(onClick = { doZap(+1) }) { Text("Chaîne suivante") }
                     Button(onClick = onExit) { Text("Retour") }
                 }
             }

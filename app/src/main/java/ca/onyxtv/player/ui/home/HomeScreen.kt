@@ -49,6 +49,7 @@ fun HomeScreen(
     vm: OnyxViewModel,
     onPlay: (PlayTarget) -> Unit,
     onGoLive: () -> Unit,
+    onGoSettings: () -> Unit,
     onOpenSeries: (VodItem) -> Unit,
 ) {
     // Une série s'ouvre sur sa fiche (saisons/épisodes) ; un film se lit directement.
@@ -70,11 +71,20 @@ fun HomeScreen(
     if (channels.isEmpty() && vod.isEmpty()) {
         Column(Modifier.fillMaxSize()) {
             (state.error ?: state.sourceErrors.takeIf { it.isNotEmpty() }?.joinToString("\n"))?.let { ErrorBanner(it, Modifier.padding(24.dp)) }
-            EmptyState(
-                title = "Bienvenue sur ONYX TV",
-                hint = if (state.reports.isEmpty()) "Ajoutez une liste M3U ou un compte Xtream dans Réglages pour commencer."
-                       else "Aucun contenu n'a pu être chargé. Réglages → « Tout mettre à jour » pour réessayer.",
-            )
+            Box(Modifier.weight(1f)) {
+                EmptyState(
+                    title = "Bienvenue sur ONYX TV",
+                    hint = if (state.reports.isEmpty()) "Ajoutez une liste M3U ou un compte Xtream pour commencer."
+                           else "Aucun contenu n'a pu être chargé. Vérifiez vos sources ou relancez la mise à jour.",
+                )
+            }
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier.align(Alignment.CenterHorizontally).padding(bottom = 48.dp),
+            ) {
+                Button(onClick = onGoSettings) { Text("Ouvrir les Réglages") }
+                if (state.reports.isNotEmpty()) Button(onClick = { vm.refresh() }) { Text("🔄 Tout mettre à jour") }
+            }
         }
         return
     }

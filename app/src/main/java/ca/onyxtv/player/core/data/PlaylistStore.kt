@@ -35,6 +35,11 @@ class PlaylistStore(private val context: Context) {
         save(current.filterNot { it.id == source.id } + source)
     }
 
+    /** Modifie une source en place (ex. format des flux live). */
+    suspend fun update(id: String, transform: (PlaylistSource) -> PlaylistSource) {
+        save(sources.first().map { if (it.id == id) transform(it) else it })
+    }
+
     suspend fun remove(id: String) {
         save(sources.first().filterNot { it.id == id })
     }

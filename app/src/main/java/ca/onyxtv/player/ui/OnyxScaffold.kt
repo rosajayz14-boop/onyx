@@ -139,7 +139,7 @@ fun OnyxRoot(vm: OnyxViewModel = viewModel()) {
         ) {
             Box(Modifier.fillMaxSize()) {
                 when (dest) {
-                    Dest.HOME -> HomeScreen(vm, onPlay = { playing = it }, onGoLive = { dest = Dest.LIVE }, onOpenSeries = { openSeries = it })
+                    Dest.HOME -> HomeScreen(vm, onPlay = { playing = it }, onGoLive = { dest = Dest.LIVE }, onGoSettings = { dest = Dest.SETTINGS }, onOpenSeries = { openSeries = it })
                     Dest.LIVE -> LiveTvScreen(vm, onPlay = { playing = it })
                     Dest.VOD -> VodScreen(vm, onPlay = { playing = it }, onOpenSeries = { openSeries = it })
                     Dest.MOSAIC -> MosaicScreen(vm, onPlay = { playing = it })
@@ -174,6 +174,8 @@ fun OnyxRoot(vm: OnyxViewModel = viewModel()) {
                 onProgress = vm::onPlaybackProgress,
                 zap = { delta -> vm.neighborChannel(target.id, delta)?.toPlayTarget() },
                 onSwitch = { playing = it },
+                zapToNumber = { n -> vm.channelByNumber(n)?.toPlayTarget() },
+                nowPlaying = { t -> vm.nowPlaying(t) },
             )
         }
     }

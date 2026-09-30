@@ -243,6 +243,25 @@ class OnyxViewModel(app: Application) : AndroidViewModel(app) {
 
     fun clearSourceStatus() { _sourceStatus.value = null }
 
+    /** Format des flux live d'un compte Xtream : "ts" (MPEG-TS) ou "m3u8" (HLS). */
+    fun setLiveExtension(sourceId: String, ext: String) {
+        viewModelScope.launch {
+            store.update(sourceId) { if (it is PlaylistSource.Xtream) it.copy(liveExtension = ext) else it }
+            _sourceStatus.value = "Format des flux live : ${if (ext == "m3u8") "HLS (m3u8)" else "MPEG-TS"} — rechargement…"
+            refresh()
+        }
+    }
+
+    /** Chaîne portant ce numéro (saisie au pavé numérique dans le lecteur). */
+    fun channelByNumber(n: Int): Channel? = _state.value.channels.firstOrNull { it.number == n }
+
+    /** Titre du programme en cours pour une cible de lecture live (bandeau du lecteur). */
+    suspend fun nowPlaying(target: PlayTarget): String? {
+        val ch = target.id?.let { id -> _state.value.channels.firstOrNull { it.id == id } } ?: return null
+        val now = System.currentTimeMillis()
+        return runCatching { repo.epg(ch) }.getOrDefault(emptyList()).firstOrNull { it.isLiveAt(now) }?.title
+    }
+
     fun removeSource(id: String) {
         viewModelScope.launch {
             store.remove(id)

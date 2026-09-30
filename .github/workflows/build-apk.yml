@@ -3,7 +3,8 @@ name: Build & Release APK
 # Compile l'APK ONYX TV et le publie dans des Releases GitHub :
 #  - "tv-latest"  : URL FIXE qui pointe toujours vers la dernière version (idéal Downloader).
 #      https://github.com/rosajayz14-boop/onyx/releases/download/tv-latest/onyx-tv.apk
-#  - "vX.Y.Z"     : Release VERSIONNÉE, créée quand on pousse un tag Git "v*".
+#  - "vX.Y.Z"     : Release VERSIONNÉE (figée), créée depuis le fichier VERSION à la racine,
+#                   un tag Git "v*" ou "Run workflow" avec une version.
 #      https://github.com/rosajayz14-boop/onyx/releases/download/vX.Y.Z/onyx-tv-X.Y.Z.apk
 #
 # Cadencer une version :   git tag v1.0.0 && git push origin v1.0.0
@@ -73,6 +74,13 @@ jobs:
             VN="${INPUT_VERSION#v}"
             echo "is_tag=true" >> "$GITHUB_OUTPUT"
             echo "tag=v$VN" >> "$GITHUB_OUTPUT"
+            echo "source=dispatch" >> "$GITHUB_OUTPUT"
+          elif [ -s VERSION ]; then
+            # Fichier VERSION à la racine : publie la Release figée vX.Y.Z si elle n'existe pas encore.
+            VN="$(tr -d ' \n\r' < VERSION)"
+            echo "is_tag=true" >> "$GITHUB_OUTPUT"
+            echo "tag=v$VN" >> "$GITHUB_OUTPUT"
+            echo "source=file" >> "$GITHUB_OUTPUT"
           else
             # Build de développement : seulement tv-latest
             VN="0.1.0"
@@ -157,6 +165,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.ver.outputs.tag }}
           VN: ${{ steps.ver.outputs.version_name }}
+          SRC: ${{ steps.ver.outputs.source }}
         run: |
           APK="dist/onyx-tv-${VN}.apk"
           NOTES="Version ${VN} — Android TV / Fire TV / Google TV.
@@ -165,7 +174,13 @@ jobs:
           \`https://github.com/${{ github.repository }}/releases/download/${TAG}/onyx-tv-${VN}.apk\`
 
           Pour toujours la dernière version, utilisez plutôt l'URL fixe \`tv-latest\`."
-          if ! gh release create "$TAG" "$APK" --title "ONYX TV ${VN}" --notes "$NOTES"; then
-            echo "Release existante -> mise à jour de l'APK"
-            gh release upload "$TAG" "$APK" --clobber
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            if [ "$SRC" = "file" ]; then
+              echo "Release $TAG déjà publiée (figée) : inchangée. Modifiez VERSION pour publier une nouvelle version."
+            else
+              echo "Release existante -> remplacement de l'APK"
+              gh release upload "$TAG" "$APK" --clobber
+            fi
+          else
+            gh release create "$TAG" "$APK" --title "ONYX TV ${VN}" --notes "$NOTES"
           fi

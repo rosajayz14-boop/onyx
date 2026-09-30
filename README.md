@@ -21,12 +21,12 @@ multi-vue, VOD) mais tout le code, le design et la marque sont à vous.
 | **Rattrapage (catch-up)** | ✅ | « ↺ Revoir » sur les programmes passés des chaînes archivées (timeshift Xtream) |
 | Films | ✅ | Catalogue Xtream, filtre par catégorie, reprise, favoris |
 | **Séries** | ✅ | Saisons / épisodes (`get_series_info`), fiche, « Reprendre SxEy » |
-| Lecteur plein écran | ✅ | Media3/ExoPlayer — HLS, DASH, TS, MP4 ; **erreurs + Réessayer**, chargement, **zapping ↑↓ / CH±** |
+| Lecteur plein écran | ✅ | Media3/ExoPlayer — HLS, DASH, TS, MP4 ; erreurs + Réessayer, chargement, **zapping ↑↓ / CH± / numéro**, **menu ≡ : pistes audio, sous-titres, format d'image**, programme en cours |
 | **Favoris / Récents / Reprise** | ✅ | Rangées « Reprendre » (barre de progression) et « Mes favoris » sur l'accueil |
 | Recherche | ✅ | Chaînes + films + séries |
 | Mosaïque multi-écran | ✅ | **4 chaînes lues simultanément** (2×2), son sur la tuile focalisée, OK = plein écran |
 | Enregistrements / DVR | ✅ | Service de premier plan → fichiers locaux ; lire / arrêter / supprimer |
-| Réglages | ✅ | Sources M3U / Xtream avec **test de connexion** explicite, auto-correction `http://` |
+| Réglages | ✅ | Sources M3U / Xtream avec **test de connexion**, format des flux **TS/HLS**, **Tout mettre à jour**, **MAJ du guide**, bilan par source, cache disque |
 | **Contrôle parental** | ✅ | PIN 4 chiffres, catégories verrouillées, verrouillage au démarrage |
 | Recommandations | ✅ | Heuristique locale (catégories des favoris / récents, notes) |
 | Navigation télécommande | ✅ | Rail latéral déployable (façon Google TV) |

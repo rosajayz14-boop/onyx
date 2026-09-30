@@ -87,7 +87,17 @@ fun SettingsScreen(vm: OnyxViewModel) {
                 )
             }
         } else {
-            items(sources, key = { it.id }) { s -> SourceRow(s) { vm.removeSource(s.id) } }
+            items(sources, key = { it.id }) { s ->
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    SourceRow(s) { vm.removeSource(s.id) }
+                    if (s is PlaylistSource.Xtream) {
+                        val hls = s.liveExtension == "m3u8"
+                        Button(onClick = { vm.setLiveExtension(s.id, if (hls) "ts" else "m3u8") }) {
+                            Text("Flux live : ${if (hls) "HLS (m3u8)" else "MPEG-TS"} — basculer si certaines chaînes ne se lisent pas")
+                        }
+                    }
+                }
+            }
         }
 
         item { AddM3uCard(vm) }
