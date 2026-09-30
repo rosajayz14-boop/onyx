@@ -35,6 +35,7 @@ import ca.onyxtv.player.ui.components.toPlayTarget
 import ca.onyxtv.player.ui.theme.OnyxCyan
 import ca.onyxtv.player.ui.theme.OnyxMuted
 import ca.onyxtv.player.viewmodel.OnyxViewModel
+import ca.onyxtv.player.viewmodel.hiddenGroups
 
 @Composable
 fun VodScreen(
@@ -45,7 +46,10 @@ fun VodScreen(
     val state by vm.state.collectAsStateWithLifecycle()
     val favorites by vm.favorites.collectAsStateWithLifecycle()
     val recents by vm.recents.collectAsStateWithLifecycle()
-    val vod = state.vod
+    val parental by vm.parental.collectAsStateWithLifecycle()
+    val unlocked by vm.unlockedGroups.collectAsStateWithLifecycle()
+    val hidden = hiddenGroups(parental, unlocked)
+    val vod = remember(state.vod, hidden) { state.vod.filterNot { it.category in hidden } }
 
     if (state.loading && vod.isEmpty()) {
         LoadingState("Chargement du catalogue…")

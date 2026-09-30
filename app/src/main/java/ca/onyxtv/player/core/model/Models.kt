@@ -21,6 +21,8 @@ data class Channel(
     val epgChannelId: String? = null, // tvg-id → clé de correspondance EPG
     val url: String,              // URL de flux prête à lire
     val kind: MediaKind = MediaKind.LIVE,
+    /** Jours d'archive (catch-up) offerts par le fournisseur, 0 = aucun. */
+    val archiveDays: Int = 0,
 )
 
 /** Un contenu à la demande (film ou série). Pour une série, [url] est vide et [seriesId] renseigné. */

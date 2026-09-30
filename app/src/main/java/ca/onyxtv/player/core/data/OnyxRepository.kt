@@ -50,6 +50,23 @@ class OnyxRepository(
         return out
     }
 
+    /**
+     * URL de rattrapage d'un programme déjà diffusé (Xtream timeshift), ou null si la chaîne
+     * n'offre pas d'archive, si le programme n'est pas terminé ou s'il est trop ancien.
+     */
+    suspend fun catchupUrl(channel: Channel, program: EpgProgram): String? {
+        if (channel.archiveDays <= 0) return null
+        val streamId = channel.streamId ?: return null
+        val now = System.currentTimeMillis()
+        if (program.stop > now) return null
+        if (program.start < now - channel.archiveDays * 86_400_000L) return null
+        val sourceId = channel.id.split(":").getOrNull(1) ?: return null
+        val src = store.sources.first().filterIsInstance<PlaylistSource.Xtream>()
+            .firstOrNull { it.id == sourceId } ?: return null
+        val minutes = (program.durationMs / 60_000L).toInt().coerceAtLeast(1)
+        return xt.timeshiftUrl(src, streamId, program.start, minutes)
+    }
+
     /** Fiche complète d'une série (saisons/épisodes). Null si la source n'existe plus. */
     suspend fun seriesDetail(item: VodItem): SeriesDetail? {
         val seriesId = item.seriesId ?: return null

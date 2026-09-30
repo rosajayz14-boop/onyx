@@ -28,6 +28,7 @@ import ca.onyxtv.player.ui.components.MediaCard
 import ca.onyxtv.player.ui.components.toPlayTarget
 import ca.onyxtv.player.ui.theme.OnyxMuted
 import ca.onyxtv.player.viewmodel.OnyxViewModel
+import ca.onyxtv.player.viewmodel.hiddenGroups
 
 private data class SearchHit(
     val title: String,
@@ -48,16 +49,19 @@ fun SearchScreen(
     onOpenSeries: (VodItem) -> Unit,
 ) {
     val state by vm.state.collectAsStateWithLifecycle()
+    val parental by vm.parental.collectAsStateWithLifecycle()
+    val unlocked by vm.unlockedGroups.collectAsStateWithLifecycle()
+    val hidden = hiddenGroups(parental, unlocked)
     var query by remember { mutableStateOf("") }
 
-    val results = remember(query, state) {
+    val results = remember(query, state, hidden) {
         val q = query.trim().lowercase()
         if (q.length < 2) emptyList()
         else buildList {
-            state.channels.forEach {
+            state.channels.filterNot { it.groupTitle in hidden }.forEach {
                 add(SearchHit(it.name, it.groupTitle, it.logoUrl, it.id, it.name.take(2).uppercase(), 16f / 9f, "DIRECT", it.toPlayTarget(), null))
             }
-            state.vod.forEach {
+            state.vod.filterNot { it.category in hidden }.forEach {
                 val isSeries = it.kind == MediaKind.SERIES
                 add(
                     SearchHit(

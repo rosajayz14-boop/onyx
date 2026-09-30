@@ -100,8 +100,18 @@ class XtreamClient(
                 epgChannelId = s.epgChannelId,
                 url = liveUrl(src, s.streamId),
                 kind = MediaKind.LIVE,
+                archiveDays = if ((s.tvArchive ?: 0) == 1) (s.tvArchiveDuration?.takeIf { it > 0 } ?: 1) else 0,
             )
         }
+    }
+
+    /**
+     * URL de rattrapage (timeshift) Xtream : .../timeshift/user/pass/{minutes}/{yyyy-MM-dd:HH-mm}/{id}.ts
+     * L'horodatage est exprimé en heure locale, comme le font les lecteurs du marché.
+     */
+    fun timeshiftUrl(src: PlaylistSource.Xtream, streamId: String, startMs: Long, durationMin: Int): String {
+        val stamp = java.text.SimpleDateFormat("yyyy-MM-dd:HH-mm", java.util.Locale.US).format(java.util.Date(startMs))
+        return "${base(src)}/timeshift/${enc(src.username)}/${enc(src.password)}/$durationMin/$stamp/$streamId.ts"
     }
 
     suspend fun vodStreams(src: PlaylistSource.Xtream, categoryId: String? = null): List<VodItem> {

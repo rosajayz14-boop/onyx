@@ -36,17 +36,38 @@ data class RecentItem(
     val resumable: Boolean get() = !live && durationMs > 0 && progress in 0.02f..0.95f
 }
 
+/** Contrôle parental : PIN à 4 chiffres, catégories verrouillées, verrouillage au démarrage. */
+@Serializable
+data class ParentalSettings(
+    val pin: String? = null,
+    val lockedGroups: Set<String> = emptySet(),
+    val lockAtStart: Boolean = false,
+) {
+    val enabled: Boolean get() = !pin.isNullOrBlank()
+}
+
 /**
- * Données utilisateur locales : favoris (ids de chaînes/contenus) et récents (reprise).
- * Persistées via DataStore, comme les sources.
+ * Données utilisateur locales : favoris (ids de chaînes/contenus), récents (reprise)
+ * et contrôle parental. Persistées via DataStore, comme les sources.
  */
 class UserStore(private val context: Context) {
 
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
     private val favKey = stringPreferencesKey("favorites_json")
     private val recentKey = stringPreferencesKey("recents_json")
+    private val parentalKey = stringPreferencesKey("parental_json")
     private val favSer = SetSerializer(String.serializer())
     private val recentSer = ListSerializer(RecentItem.serializer())
+
+    val parental: Flow<ParentalSettings> = context.userDataStore.data.map { prefs ->
+        val raw = prefs[parentalKey] ?: return@map ParentalSettings()
+        runCatching { json.decodeFromString(ParentalSettings.serializer(), raw) }.getOrDefault(ParentalSettings())
+    }
+
+    suspend fun updateParental(transform: (ParentalSettings) -> ParentalSettings) {
+        val next = transform(parental.first())
+        context.userDataStore.edit { it[parentalKey] = json.encodeToString(ParentalSettings.serializer(), next) }
+    }
 
     val favorites: Flow<Set<String>> = context.userDataStore.data.map { prefs ->
         val raw = prefs[favKey] ?: "[]"

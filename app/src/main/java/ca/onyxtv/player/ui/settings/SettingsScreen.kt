@@ -33,6 +33,7 @@ import androidx.tv.material3.Card
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import ca.onyxtv.player.core.model.PlaylistSource
+import ca.onyxtv.player.ui.theme.OnyxCyan
 import ca.onyxtv.player.ui.theme.OnyxLive
 import ca.onyxtv.player.ui.theme.OnyxMuted
 import ca.onyxtv.player.ui.theme.OnyxSurface
@@ -42,6 +43,11 @@ import ca.onyxtv.player.viewmodel.OnyxViewModel
 fun SettingsScreen(vm: OnyxViewModel) {
     val sources by vm.sources.collectAsStateWithLifecycle()
     val status by vm.sourceStatus.collectAsStateWithLifecycle()
+    val parental by vm.parental.collectAsStateWithLifecycle()
+    val state by vm.state.collectAsStateWithLifecycle()
+    val allGroups = remember(state.channels, state.vod) {
+        (state.groups + state.vod.mapNotNull { it.category }).distinct()
+    }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(horizontal = 36.dp),
@@ -51,7 +57,7 @@ fun SettingsScreen(vm: OnyxViewModel) {
         item { Text("Réglages", style = MaterialTheme.typography.headlineLarge) }
         status?.let { msg ->
             item {
-                val ok = msg.startsWith("Connect")
+                val ok = msg.startsWith("Connect") || msg.startsWith("Liste ajoutée")
                 Text(
                     msg,
                     color = if (ok) OnyxLive else Md3.colorScheme.error,
@@ -79,6 +85,31 @@ fun SettingsScreen(vm: OnyxViewModel) {
 
         item { AddM3uCard(vm) }
         item { AddXtreamCard(vm) }
+
+        // ---- Contrôle parental ----
+        item { ParentalCard(vm, parental.enabled, parental.lockAtStart) }
+        if (parental.enabled) {
+            item {
+                Text(
+                    if (allGroups.isEmpty()) "Ajoutez une source pour choisir les catégories à verrouiller."
+                    else "Catégories verrouillées (OK pour basculer) — demandées par PIN à chaque lancement :",
+                    color = OnyxMuted,
+                )
+            }
+            items(allGroups, key = { "lock:$it" }) { g ->
+                val locked = g in parental.lockedGroups
+                Card(onClick = { vm.toggleLockedGroup(g) }, modifier = Modifier.fillMaxWidth()) {
+                    Row(
+                        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(g, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(end = 12.dp))
+                        Text(if (locked) "🔒 Verrouillée" else "🔓 Libre", color = if (locked) OnyxLive else OnyxCyan, style = MaterialTheme.typography.labelLarge)
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -177,5 +208,32 @@ private fun AddXtreamCard(vm: OnyxViewModel) {
                 label = ""; server = ""; user = ""; pass = ""
             }
         }) { Text("Ajouter le compte") }
+    }
+}
+
+@Composable
+private fun ParentalCard(vm: OnyxViewModel, enabled: Boolean, lockAtStart: Boolean) {
+    var pin by remember { mutableStateOf("") }
+
+    FormCard("Contrôle parental") {
+        Text(
+            if (enabled) "PIN actif. Vous pouvez verrouiller des catégories ci-dessous ou l'application au démarrage."
+            else "Définissez un code à 4 chiffres pour verrouiller des catégories (ex. adultes) ou l'application.",
+            color = OnyxMuted,
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        Field("Nouveau code PIN (4 chiffres)", pin) { v -> if (v.length <= 4 && v.all { it.isDigit() }) pin = v }
+        Spacer(Modifier.height(8.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Button(onClick = { if (pin.length == 4) { vm.setPin(pin); pin = "" } }) {
+                Text(if (enabled) "Changer le PIN" else "Activer le PIN")
+            }
+            if (enabled) {
+                Button(onClick = { vm.setPin(null) }) { Text("Désactiver") }
+                Button(onClick = { vm.setLockAtStart(!lockAtStart) }) {
+                    Text("Verrouiller au démarrage : ${if (lockAtStart) "Oui" else "Non"}")
+                }
+            }
+        }
     }
 }

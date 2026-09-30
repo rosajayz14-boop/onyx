@@ -40,6 +40,7 @@ import ca.onyxtv.player.ui.components.Rail
 import ca.onyxtv.player.ui.components.toPlayTarget
 import ca.onyxtv.player.ui.theme.OnyxMuted
 import ca.onyxtv.player.viewmodel.OnyxViewModel
+import ca.onyxtv.player.viewmodel.hiddenGroups
 import ca.onyxtv.player.viewmodel.recommendVod
 import coil.compose.AsyncImage
 
@@ -55,8 +56,12 @@ fun HomeScreen(
     val state by vm.state.collectAsStateWithLifecycle()
     val favorites by vm.favorites.collectAsStateWithLifecycle()
     val recents by vm.recents.collectAsStateWithLifecycle()
-    val channels = state.channels
-    val vod = state.vod
+    val parental by vm.parental.collectAsStateWithLifecycle()
+    val unlocked by vm.unlockedGroups.collectAsStateWithLifecycle()
+    val hidden = hiddenGroups(parental, unlocked)
+    // Les catégories verrouillées (contrôle parental) n'apparaissent pas tant qu'elles ne sont pas déverrouillées.
+    val channels = remember(state.channels, hidden) { state.channels.filterNot { it.groupTitle in hidden } }
+    val vod = remember(state.vod, hidden) { state.vod.filterNot { it.category in hidden } }
 
     if (state.loading && channels.isEmpty() && vod.isEmpty()) {
         LoadingState()

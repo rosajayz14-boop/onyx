@@ -4,12 +4,17 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import ca.onyxtv.player.core.data.OnyxRepository
+import ca.onyxtv.player.core.data.ParentalSettings
 import ca.onyxtv.player.core.data.PlaylistStore
 import ca.onyxtv.player.core.data.RecentItem
 import ca.onyxtv.player.core.data.UserStore
 import ca.onyxtv.player.core.model.Channel
+import ca.onyxtv.player.core.model.EpgProgram
 import ca.onyxtv.player.core.model.PlaylistSource
 import ca.onyxtv.player.core.model.VodItem
+import ca.onyxtv.player.dvr.RecordingInfo
+import ca.onyxtv.player.dvr.RecordingService
+import ca.onyxtv.player.dvr.RecordingStore
 import ca.onyxtv.player.player.PlayTarget
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -35,7 +40,81 @@ class OnyxViewModel(app: Application) : AndroidViewModel(app) {
 
     private val store = PlaylistStore(app)
     private val userStore = UserStore(app)
+    private val recStore = RecordingStore(app)
     private val repo = OnyxRepository(store)
+
+    // ---- DVR ----
+    val recordings: StateFlow<List<RecordingInfo>> =
+        recStore.recordings.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    fun startRecording(channel: Channel, minutes: Int) =
+        RecordingService.start(getApplication<Application>(), channel.url, channel.name, channel.id, minutes)
+
+    fun stopRecording(id: String) = RecordingService.stop(getApplication<Application>(), id)
+
+    fun deleteRecording(id: String) {
+        viewModelScope.launch { recStore.delete(id) }
+    }
+
+    // ---- Contrôle parental ----
+    val parental: StateFlow<ParentalSettings> =
+        userStore.parental.stateIn(viewModelScope, SharingStarted.Eagerly, ParentalSettings())
+
+    private val _unlockedGroups = MutableStateFlow<Set<String>>(emptySet())
+    /** Catégories déverrouillées pour cette session (redemandées au prochain lancement). */
+    val unlockedGroups: StateFlow<Set<String>> = _unlockedGroups.asStateFlow()
+
+    private val _appUnlocked = MutableStateFlow(false)
+    val appUnlocked: StateFlow<Boolean> = _appUnlocked.asStateFlow()
+
+    private fun checkPin(pin: String) = parental.value.enabled && parental.value.pin == pin
+
+    fun unlockGroup(group: String, pin: String): Boolean {
+        if (!checkPin(pin)) return false
+        _unlockedGroups.update { it + group }
+        return true
+    }
+
+    fun unlockApp(pin: String): Boolean {
+        if (!checkPin(pin)) return false
+        _appUnlocked.value = true
+        return true
+    }
+
+    /** Définit (4 chiffres) ou supprime (null) le PIN. */
+    fun setPin(pin: String?) {
+        viewModelScope.launch {
+            userStore.updateParental { it.copy(pin = pin?.takeIf { p -> p.length == 4 && p.all(Char::isDigit) }) }
+            if (pin == null) { _unlockedGroups.value = emptySet(); _appUnlocked.value = true }
+        }
+    }
+
+    fun toggleLockedGroup(group: String) {
+        viewModelScope.launch {
+            userStore.updateParental {
+                it.copy(lockedGroups = if (group in it.lockedGroups) it.lockedGroups - group else it.lockedGroups + group)
+            }
+            _unlockedGroups.update { it - group }
+        }
+    }
+
+    fun setLockAtStart(enabled: Boolean) {
+        viewModelScope.launch { userStore.updateParental { it.copy(lockAtStart = enabled) } }
+    }
+
+    // ---- Rattrapage (catch-up) ----
+    /** Cible de lecture d'un programme déjà diffusé, si le fournisseur l'archive. */
+    suspend fun catchupTarget(channel: Channel, program: EpgProgram): PlayTarget? =
+        repo.catchupUrl(channel, program)?.let { url ->
+            PlayTarget(
+                id = "${channel.id}:cu:${program.start}",
+                url = url,
+                title = program.title,
+                subtitle = "Rattrapage · ${channel.name}",
+                imageUrl = channel.logoUrl,
+                isLive = false,
+            )
+        }
 
     private val _state = MutableStateFlow(OnyxUiState())
     val state: StateFlow<OnyxUiState> = _state.asStateFlow()
@@ -158,6 +237,10 @@ class OnyxViewModel(app: Application) : AndroidViewModel(app) {
     /** Fiche d'une série (saisons/épisodes), chargée à la demande. */
     suspend fun seriesDetail(item: VodItem) = repo.seriesDetail(item)
 }
+
+/** Catégories à masquer tant qu'elles n'ont pas été déverrouillées par le PIN. */
+fun hiddenGroups(parental: ParentalSettings, unlocked: Set<String>): Set<String> =
+    if (!parental.enabled) emptySet() else parental.lockedGroups - unlocked
 
 /**
  * Recommandations : heuristique locale basée sur les catégories des favoris et des récents.

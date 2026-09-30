@@ -30,6 +30,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.tv.material3.DrawerValue
 import androidx.tv.material3.Icon
@@ -40,6 +41,7 @@ import androidx.tv.material3.Text
 import ca.onyxtv.player.R
 import ca.onyxtv.player.player.PlayTarget
 import ca.onyxtv.player.player.PlayerScreen
+import ca.onyxtv.player.ui.components.PinDialog
 import ca.onyxtv.player.ui.components.toPlayTarget
 import ca.onyxtv.player.ui.dvr.DvrScreen
 import ca.onyxtv.player.ui.home.HomeScreen
@@ -69,6 +71,20 @@ fun OnyxRoot(vm: OnyxViewModel = viewModel()) {
     var dest by remember { mutableStateOf(Dest.HOME) }
     var playing by remember { mutableStateOf<PlayTarget?>(null) }
     var openSeries by remember { mutableStateOf<VodItem?>(null) }
+
+    // Verrouillage de l'application au démarrage (contrôle parental).
+    val parental by vm.parental.collectAsStateWithLifecycle()
+    val appUnlocked by vm.appUnlocked.collectAsStateWithLifecycle()
+    if (parental.enabled && parental.lockAtStart && !appUnlocked) {
+        Box(Modifier.fillMaxSize().background(OnyxBg)) {
+            PinDialog(
+                title = "ONYX TV est verrouillé",
+                subtitle = "Entrez votre code PIN pour continuer.",
+                onSubmit = { vm.unlockApp(it) },
+            )
+        }
+        return
+    }
 
     Box(
         Modifier
@@ -124,7 +140,7 @@ fun OnyxRoot(vm: OnyxViewModel = viewModel()) {
                     Dest.LIVE -> LiveTvScreen(vm, onPlay = { playing = it })
                     Dest.VOD -> VodScreen(vm, onPlay = { playing = it }, onOpenSeries = { openSeries = it })
                     Dest.MOSAIC -> MosaicScreen(vm, onPlay = { playing = it })
-                    Dest.DVR -> DvrScreen()
+                    Dest.DVR -> DvrScreen(vm, onPlay = { playing = it })
                     Dest.SETTINGS -> SettingsScreen(vm)
                     Dest.SEARCH -> SearchScreen(vm, onPlay = { playing = it }, onOpenSeries = { openSeries = it })
                 }
