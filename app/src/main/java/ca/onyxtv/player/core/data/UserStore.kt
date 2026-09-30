@@ -34,6 +34,9 @@ data class RecentItem(
 
     /** Reprise pertinente : on a avancé mais pas fini. */
     val resumable: Boolean get() = !live && durationMs > 0 && progress in 0.02f..0.95f
+
+    /** Contenu vu jusqu'au bout (ou presque). */
+    val finished: Boolean get() = !live && durationMs > 0 && progress > 0.95f
 }
 
 /** Contrôle parental : PIN à 4 chiffres, catégories verrouillées, verrouillage au démarrage. */

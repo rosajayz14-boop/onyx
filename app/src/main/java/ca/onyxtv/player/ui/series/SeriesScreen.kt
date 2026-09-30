@@ -83,6 +83,8 @@ fun SeriesScreen(
                 onToggleFavorite = { vm.toggleFavorite(item.id) },
                 progressById = recents.filter { it.resumable }.associate { it.id to it.progress },
                 positionById = recents.filter { it.resumable }.associate { it.id to it.positionMs },
+                finishedIds = recents.filter { it.finished }.map { it.id }.toSet(),
+                lastWatchedId = recents.firstOrNull { r -> detail.seasons.values.any { eps -> eps.any { it.id == r.id } } }?.id,
                 onPlay = onPlay,
                 onBack = onBack,
             )
@@ -98,25 +100,42 @@ private fun SeriesContent(
     onToggleFavorite: () -> Unit,
     progressById: Map<String, Float>,
     positionById: Map<String, Long>,
+    finishedIds: Set<String>,
+    lastWatchedId: String?,
     onPlay: (PlayTarget) -> Unit,
     onBack: () -> Unit,
 ) {
     val seasons = detail.seasonNumbers
-    var season by remember(detail) { mutableIntStateOf(seasons.first()) }
+    // Tous les épisodes dans l'ordre de visionnage (saison puis numéro).
+    val ordered = remember(detail) { seasons.flatMap { detail.seasons[it].orEmpty() } }
+
+    // Où en est-on ? Dernier épisode regardé : entamé → on le reprend ; terminé → le suivant.
+    val (nextUp, nextUpMode) = remember(detail, lastWatchedId, progressById, finishedIds) {
+        val last = ordered.firstOrNull { it.id == lastWatchedId }
+        when {
+            last == null -> ordered.firstOrNull() to "start"
+            progressById.containsKey(last.id) -> last to "resume"
+            else -> (ordered.getOrNull(ordered.indexOf(last) + 1) ?: last) to "next"
+        }
+    }
+
+    var season by remember(detail) { mutableIntStateOf(nextUp?.season ?: seasons.first()) }
     val episodes = detail.seasons[season].orEmpty()
 
-    fun target(ep: Episode) = PlayTarget(
-        id = ep.id,
-        url = ep.url,
-        title = "S${ep.season}E${ep.number} · ${ep.title}",
-        subtitle = detail.name,
-        imageUrl = ep.imageUrl ?: detail.coverUrl ?: item.posterUrl,
-        isLive = false,
-        startPositionMs = positionById[ep.id] ?: 0L,
-    )
-
-    // Épisode « suivant » : premier épisode entamé, sinon le premier de la saison.
-    val nextUp = episodes.firstOrNull { progressById.containsKey(it.id) } ?: episodes.firstOrNull()
+    // Cible de lecture avec enchaînement automatique vers l'épisode suivant.
+    fun target(ep: Episode): PlayTarget {
+        val following = ordered.getOrNull(ordered.indexOf(ep) + 1)
+        return PlayTarget(
+            id = ep.id,
+            url = ep.url,
+            title = "S${ep.season}E${ep.number} · ${ep.title}",
+            subtitle = detail.name,
+            imageUrl = ep.imageUrl ?: detail.coverUrl ?: item.posterUrl,
+            isLive = false,
+            startPositionMs = positionById[ep.id] ?: 0L,
+            next = following?.let { target(it) },
+        )
+    }
 
     Row(Modifier.fillMaxSize().padding(32.dp)) {
         Column(Modifier.width(230.dp)) {
@@ -161,7 +180,14 @@ private fun SeriesContent(
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(vertical = 14.dp)) {
                 nextUp?.let { ep ->
                     Button(onClick = { onPlay(target(ep)) }) {
-                        Text(if (progressById.containsKey(ep.id)) "▶ Reprendre S${ep.season}E${ep.number}" else "▶ Lire S${ep.season}E${ep.number}")
+                        Text(
+                            when (nextUpMode) {
+                                "resume" -> "▶ Reprendre S${ep.season}E${ep.number} · ${ep.title} (${((progressById[ep.id] ?: 0f) * 100).toInt()} %)"
+                                "next" -> "▶ Épisode suivant S${ep.season}E${ep.number} · ${ep.title}"
+                                else -> "▶ Commencer S${ep.season}E${ep.number}"
+                            },
+                            maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        )
                     }
                 }
                 Button(onClick = onToggleFavorite) {
@@ -196,7 +222,11 @@ private fun SeriesContent(
                             if (meta.isNotBlank()) Text(meta, maxLines = 2, overflow = TextOverflow.Ellipsis, color = OnyxMuted)
                         },
                         trailingContent = {
-                            if (progress != null) Text("${(progress * 100).toInt()} %", color = OnyxCyan)
+                            when {
+                                progress != null -> Text("↺ ${(progress * 100).toInt()} %", color = OnyxCyan)
+                                ep.id in finishedIds -> Text("✓ Vu", color = OnyxMuted)
+                                ep.id == nextUp?.id -> Text("▶ Suivant", color = OnyxCyan)
+                            }
                         },
                         modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp),
                     )

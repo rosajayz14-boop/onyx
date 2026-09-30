@@ -78,7 +78,15 @@ data class PlayTarget(
     val isLive: Boolean = false,
     /** Position de reprise (ms), 0 = depuis le début. */
     val startPositionMs: Long = 0L,
+    /** Contenu à enchaîner automatiquement à la fin (épisode suivant), null sinon. */
+    val next: PlayTarget? = null,
 )
+
+private fun fmtClock(ms: Long): String {
+    val s = ms / 1000
+    return if (s >= 3600) String.format(java.util.Locale.US, "%d:%02d:%02d", s / 3600, (s % 3600) / 60, s % 60)
+    else String.format(java.util.Locale.US, "%d:%02d", s / 60, s % 60)
+}
 
 /** Une piste (audio ou sous-titre) sélectionnable. */
 private data class TrackOption(val group: Tracks.Group, val index: Int, val label: String, val selected: Boolean)
@@ -139,6 +147,8 @@ fun PlayerScreen(
     var tracks by remember { mutableStateOf(Tracks.EMPTY) }
     var resize by remember { mutableIntStateOf(AspectRatioFrameLayout.RESIZE_MODE_FIT) }
     var digits by remember { mutableStateOf("") }
+    var ended by remember { mutableStateOf(false) }
+    var countdown by remember { mutableIntStateOf(0) }
 
     val currentTarget by rememberUpdatedState(target)
     val currentOnProgress by rememberUpdatedState(onProgress)
@@ -181,6 +191,7 @@ fun PlayerScreen(
         val listener = object : Player.Listener {
             override fun onPlaybackStateChanged(playbackState: Int) {
                 buffering = playbackState == Player.STATE_BUFFERING
+                if (playbackState == Player.STATE_ENDED && !currentTarget.isLive) ended = true
             }
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 if (isPlaying) error = null
@@ -237,11 +248,21 @@ fun PlayerScreen(
 
     // (Re)chargement à chaque changement de cible, avec bandeau d'info temporaire.
     LaunchedEffect(target.url) {
+        ended = false
         load()
         panelOpen = false
         showInfo = true
         delay(5_000)
         showInfo = false
+    }
+
+    // Fin de lecture : épisode suivant après un compte à rebours, sinon retour.
+    LaunchedEffect(ended) {
+        if (!ended) return@LaunchedEffect
+        val next = currentTarget.next
+        if (next == null) { delay(2_500); onExit(); return@LaunchedEffect }
+        for (i in 10 downTo 1) { countdown = i; delay(1_000) }
+        currentOnSwitch(next)
     }
 
     // Programme en cours (EPG) pour le direct.
@@ -355,6 +376,9 @@ fun PlayerScreen(
                 }
                 Text(target.title, style = MaterialTheme.typography.headlineMedium, color = Color.White)
                 epgLine?.let { Text("En ce moment : $it", style = MaterialTheme.typography.bodyLarge, color = Color.White.copy(alpha = 0.85f)) }
+                if (target.startPositionMs > 0) {
+                    Text("↺ Reprise à ${fmtClock(target.startPositionMs)}", style = MaterialTheme.typography.bodyLarge, color = OnyxCyan)
+                }
                 Text(
                     buildString {
                         if (target.isLive && zap != null) append("↑ ↓ chaîne  ·  0-9 numéro  ·  ")
@@ -437,6 +461,32 @@ fun PlayerScreen(
                 }
 
                 Text("Retour ou Menu pour fermer", color = OnyxMuted, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 12.dp))
+            }
+        }
+
+        // Fin de lecture
+        if (ended && error == null) {
+            val next = target.next
+            Column(
+                Modifier
+                    .align(Alignment.Center)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(Color(0xE60B0C14))
+                    .padding(28.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                if (next != null) {
+                    Text("Épisode suivant dans $countdown s", style = MaterialTheme.typography.headlineMedium, color = Color.White)
+                    Text(next.title, style = MaterialTheme.typography.bodyLarge, color = OnyxMuted)
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Button(onClick = { currentOnSwitch(next) }) { Text("▶ Lire maintenant") }
+                        Button(onClick = onExit) { Text("Retour") }
+                    }
+                } else {
+                    Text("Lecture terminée", style = MaterialTheme.typography.headlineMedium, color = Color.White)
+                    Button(onClick = onExit) { Text("Retour") }
+                }
             }
         }
 

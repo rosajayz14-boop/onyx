@@ -78,6 +78,7 @@ fun MovieScreen(
         value = runCatching { vm.movieDetail(item) }.getOrNull() ?: MovieDetail(plot = item.plot)
     }
     val recent = recents.firstOrNull { it.id == item.id && it.resumable }
+    val seen = recents.any { it.id == item.id && it.finished }
     var trailerNote by remember { mutableStateOf<String?>(null) }
 
     BackHandler(enabled = true) { onBack() }
@@ -147,6 +148,7 @@ fun MovieScreen(
                         Text(if (recent != null) "▶ Reprendre (${(recent.progress * 100).toInt()} %)" else "▶ Lire")
                     }
                     if (recent != null) Button(onClick = { onPlay(item.toPlayTarget()) }) { Text("↺ Depuis le début") }
+                    if (seen && recent == null) Text("✓ Vu", color = OnyxMuted, modifier = Modifier.padding(start = 6.dp))
                     d?.trailerUrl?.let { url -> Button(onClick = { openTrailer(url) }) { Text("🎬 Bande-annonce") } }
                     Button(onClick = { vm.toggleFavorite(item.id) }) {
                         Text(if (item.id in favorites) "★ Retirer des favoris" else "☆ Ajouter aux favoris")
