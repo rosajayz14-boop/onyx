@@ -29,6 +29,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -122,11 +123,24 @@ fun OnyxRoot(vm: OnyxViewModel = viewModel()) {
         }
     }
 
+    // Vérification de mise à jour à chaque retour au premier plan (limitée à 1×/jour dans le VM).
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    androidx.compose.runtime.DisposableEffect(lifecycleOwner) {
+        val obs = androidx.lifecycle.LifecycleEventObserver { _, e -> if (e == androidx.lifecycle.Lifecycle.Event.ON_START) vm.checkForUpdate() }
+        lifecycleOwner.lifecycle.addObserver(obs)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(obs) }
+    }
+
+    // Tant qu'une fiche (film/série) ou le lecteur est ouvert, le contenu en dessous ne doit
+    // JAMAIS recevoir le focus de la télécommande (sinon les touches agissent sur l'écran caché).
+    val overlayOpen = playing != null || openDetail != null
+
     Box(
         Modifier
             .fillMaxSize()
             .background(OnyxBg)
     ) {
+        Box(Modifier.fillMaxSize().focusProperties { canFocus = !overlayOpen }) {
         NavigationDrawer(
             drawerContent = { drawerValue ->
                 Column(
@@ -183,6 +197,8 @@ fun OnyxRoot(vm: OnyxViewModel = viewModel()) {
                 }
             }
         }
+
+        } // fin du contenu focalisable
 
         // Horloge discrète (mise à jour chaque 30 s), masquée pendant la lecture.
         if (playing == null) {

@@ -28,6 +28,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -74,7 +75,9 @@ fun SeriesScreen(
                     hint = result.exceptionOrNull()?.message?.let { "Le serveur n'a pas répondu ($it)." }
                         ?: "Aucun épisode n'a été renvoyé par le serveur pour cette série.",
                 )
-                Button(onClick = onBack, modifier = Modifier.align(Alignment.CenterHorizontally).padding(bottom = 36.dp)) { Text("Retour") }
+                val backFocus = remember { androidx.compose.ui.focus.FocusRequester() }
+                androidx.compose.runtime.LaunchedEffect(Unit) { kotlinx.coroutines.delay(80); runCatching { backFocus.requestFocus() } }
+                Button(onClick = onBack, modifier = Modifier.align(Alignment.CenterHorizontally).padding(bottom = 36.dp).focusRequester(backFocus)) { Text("Retour") }
             }
             else -> SeriesContent(
                 item = item,
@@ -120,6 +123,8 @@ private fun SeriesContent(
     }
 
     var season by remember(detail) { mutableIntStateOf(nextUp?.season ?: seasons.first()) }
+    val playFocus = remember { androidx.compose.ui.focus.FocusRequester() }
+    androidx.compose.runtime.LaunchedEffect(detail) { kotlinx.coroutines.delay(80); runCatching { playFocus.requestFocus() } }
     val episodes = detail.seasons[season].orEmpty()
 
     // Cible de lecture avec enchaînement automatique vers l'épisode suivant.
@@ -179,7 +184,7 @@ private fun SeriesContent(
 
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(vertical = 14.dp)) {
                 nextUp?.let { ep ->
-                    Button(onClick = { onPlay(target(ep)) }) {
+                    Button(onClick = { onPlay(target(ep)) }, modifier = Modifier.focusRequester(playFocus)) {
                         Text(
                             when (nextUpMode) {
                                 "resume" -> "▶ Reprendre S${ep.season}E${ep.number} · ${ep.title} (${((progressById[ep.id] ?: 0f) * 100).toInt()} %)"

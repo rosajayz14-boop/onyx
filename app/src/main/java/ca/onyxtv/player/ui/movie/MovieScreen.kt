@@ -26,6 +26,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -72,6 +73,8 @@ fun MovieScreen(
     val detail by produceState<MovieDetail?>(initialValue = null, item.id) {
         value = runCatching { vm.movieDetail(item) }.getOrNull() ?: MovieDetail(plot = item.plot)
     }
+    val playFocus = remember { androidx.compose.ui.focus.FocusRequester() }
+    androidx.compose.runtime.LaunchedEffect(item.id) { kotlinx.coroutines.delay(80); runCatching { playFocus.requestFocus() } }
     val recent = recents.firstOrNull { it.id == item.id && it.resumable }
     val seen = recents.any { it.id == item.id && it.finished }
 
@@ -136,7 +139,10 @@ fun MovieScreen(
                 )
 
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(vertical = 16.dp)) {
-                    Button(onClick = { onPlay(recent?.toPlayTarget() ?: item.toPlayTarget()) }) {
+                    Button(
+                        onClick = { onPlay(recent?.toPlayTarget() ?: item.toPlayTarget()) },
+                        modifier = Modifier.focusRequester(playFocus),
+                    ) {
                         Text(if (recent != null) "▶ Reprendre (${(recent.progress * 100).toInt()} %)" else "▶ Lire")
                     }
                     if (recent != null) Button(onClick = { onPlay(item.toPlayTarget()) }) { Text("↺ Depuis le début") }
