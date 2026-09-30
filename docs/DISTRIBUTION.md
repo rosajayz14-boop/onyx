@@ -52,10 +52,15 @@ En plus de `tv-latest` (toujours la dernière), vous pouvez publier des **versio
 Il suffit de pousser un **tag** `vX.Y.Z` : la CI crée une Release dédiée et fixe le
 `versionName` de l'app sur ce numéro.
 
-```bash
-git tag v1.0.0
-git push origin v1.0.0
-```
+**Deux façons de cadencer une version :**
+
+- **Par tag Git** (depuis votre machine) :
+  ```bash
+  git tag v1.0.0
+  git push origin v1.0.0
+  ```
+- **Sans tag, depuis GitHub** : onglet **Actions → Build & Release APK → Run workflow**,
+  puis renseignez le champ **version** (ex. `1.0.0`). Le tag `v1.0.0` est créé automatiquement.
 
 Cela produit :
 - une Release **`v1.0.0`** avec l'APK `onyx-tv-1.0.0.apk` :
