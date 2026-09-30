@@ -19,6 +19,7 @@ import androidx.compose.material.icons.rounded.LiveTv
 import androidx.compose.material.icons.rounded.Movie
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material.icons.rounded.Today
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import kotlinx.coroutines.delay
@@ -46,6 +47,7 @@ import ca.onyxtv.player.player.PlayerScreen
 import ca.onyxtv.player.ui.components.PinDialog
 import ca.onyxtv.player.ui.components.toPlayTarget
 import ca.onyxtv.player.ui.dvr.DvrScreen
+import ca.onyxtv.player.ui.guide.GuideScreen
 import ca.onyxtv.player.ui.home.HomeScreen
 import ca.onyxtv.player.ui.live.LiveTvScreen
 import ca.onyxtv.player.ui.mosaic.MosaicScreen
@@ -63,6 +65,7 @@ enum class Dest(val label: String, val icon: ImageVector) {
     SEARCH("Recherche", Icons.Rounded.Search),
     HOME("Accueil", Icons.Rounded.Home),
     LIVE("TV en direct", Icons.Rounded.LiveTv),
+    GUIDE("Guide TV", Icons.Rounded.Today),
     VOD("Films & Séries", Icons.Rounded.Movie),
     MOSAIC("Mosaïque", Icons.Rounded.GridView),
     DVR("Enregistrements", Icons.Rounded.Dvr),
@@ -141,6 +144,7 @@ fun OnyxRoot(vm: OnyxViewModel = viewModel()) {
                 when (dest) {
                     Dest.HOME -> HomeScreen(vm, onPlay = { playing = it }, onGoLive = { dest = Dest.LIVE }, onGoSettings = { dest = Dest.SETTINGS }, onOpenSeries = { openSeries = it })
                     Dest.LIVE -> LiveTvScreen(vm, onPlay = { playing = it })
+                    Dest.GUIDE -> GuideScreen(vm, onPlay = { playing = it })
                     Dest.VOD -> VodScreen(vm, onPlay = { playing = it }, onOpenSeries = { openSeries = it })
                     Dest.MOSAIC -> MosaicScreen(vm, onPlay = { playing = it })
                     Dest.DVR -> DvrScreen(vm, onPlay = { playing = it })

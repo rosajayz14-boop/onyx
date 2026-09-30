@@ -113,7 +113,7 @@ class OnyxRepository(
                 val sourceId = channel.id.split(":").getOrNull(1)
                 sources.filterIsInstance<PlaylistSource.Xtream>()
                     .firstOrNull { it.id == sourceId }
-                    ?.let { src -> return@run runCatching { xt.shortEpg(src, sid) }.getOrDefault(emptyList()) }
+                    ?.let { src -> return@run runCatching { xt.shortEpg(src, sid, limit = 30) }.getOrDefault(emptyList()) }
             }
             // M3U : XMLTV téléchargé une fois (cache), filtré sur le tvg-id
             val epgId = channel.epgChannelId ?: return@run emptyList()

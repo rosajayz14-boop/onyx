@@ -7,7 +7,9 @@ Ce fichier distingue ce qui est **livré** de ce qui reste **à faire**.
 ### Socle
 - Navigation télécommande (rail latéral déployable).
 - Chaînes en direct depuis **M3U** et **Xtream Codes**, avec **noms de catégories** (plus d'IDs).
-- Guide **EPG** now/next (Xtream `short_epg` + XMLTV pour M3U).
+- Guide **EPG** now/next (Xtream `short_epg` + XMLTV pour M3U) et **grille TV plein écran**
+  (style Helix / TiviMate : lignes de chaînes, colonnes horaires, blocs proportionnels, ligne
+  « maintenant », fiche du programme, regarder / revoir / enregistrer jusqu'à la fin).
 - **Lecteur** Media3/ExoPlayer plein écran (HLS/DASH/TS/MP4) : indicateur de chargement,
   écran d'erreur avec « Réessayer », **reprise** à la dernière position, **zapping** ↑/↓ et CH±.
 - **Réglages** : ajout/suppression de sources, **test de connexion** avec message explicite,
@@ -34,7 +36,6 @@ Ce fichier distingue ce qui est **livré** de ce qui reste **à faire**.
 ## À faire (prochaines itérations)
 
 ### Priorité haute
-- **EPG plein écran** : grille temporelle multi-chaînes (au-delà du now/next).
 - **Programmation d'enregistrement** depuis l'EPG (démarrage/arrêt à l'heure du programme).
 - **Tests unitaires** : `M3uParser`, `XtreamClient` (dont parsing des séries), `XmltvParser`.
 

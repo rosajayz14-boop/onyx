@@ -17,7 +17,7 @@ multi-vue, VOD) mais tout le code, le design et la marque sont à vous.
 | Domaine | État | Détails |
 |---|---|---|
 | Chaînes en direct | ✅ | M3U/M3U8 + Xtream Codes, **catégories** (noms), compteurs, ★ favoris |
-| Guide EPG (now/next) | ✅ | Xtream `short_epg` + XMLTV pour M3U |
+| Guide EPG | ✅ | now/next + **grille TV plein écran** style Helix / TiviMate (ligne « maintenant », fiche programme, OK = regarder / revoir / enregistrer) |
 | **Rattrapage (catch-up)** | ✅ | « ↺ Revoir » sur les programmes passés des chaînes archivées (timeshift Xtream) |
 | Films | ✅ | Catalogue Xtream, filtre par catégorie, reprise, favoris |
 | **Séries** | ✅ | Saisons / épisodes (`get_series_info`), fiche, « Reprendre SxEy » |
