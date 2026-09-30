@@ -23,8 +23,10 @@ android {
         applicationId = "ca.onyxtv.player"
         minSdk = 21          // Android TV / Fire TV (Leanback) — base compatible
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        // Version : surchargée par la CI depuis le tag Git (ONYX_VERSION_NAME) et le
+        // numéro de build (ONYX_VERSION_CODE). Valeurs par défaut pour un build local.
+        versionCode = System.getenv("ONYX_VERSION_CODE")?.toIntOrNull() ?: 1
+        versionName = System.getenv("ONYX_VERSION_NAME") ?: "0.1.0"
         vectorDrawables { useSupportLibrary = true }
     }
 

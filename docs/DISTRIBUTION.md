@@ -44,7 +44,33 @@ pour toutes les futures mises à jour : recréer un code n'est pas nécessaire.
 
 Poussez vos changements → Actions recompile → la Release `tv-latest` est remplacée.
 Sur le téléviseur, réinstallez via le même code/URL : la mise à jour s'installe par-dessus
-(la signature est stable, voir `keystore/`).
+(si une clé de release stable est configurée, sinon désinstaller d'abord — voir §5).
+
+## 3bis. Versions (tags Git)
+
+En plus de `tv-latest` (toujours la dernière), vous pouvez publier des **versions figées**.
+Il suffit de pousser un **tag** `vX.Y.Z` : la CI crée une Release dédiée et fixe le
+`versionName` de l'app sur ce numéro.
+
+```bash
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+Cela produit :
+- une Release **`v1.0.0`** avec l'APK `onyx-tv-1.0.0.apk` :
+  `https://github.com/rosajayz14-boop/onyx/releases/download/v1.0.0/onyx-tv-1.0.0.apk`
+- la mise à jour de **`tv-latest`** vers cette même version.
+
+Le `versionCode` (entier interne qui doit toujours augmenter) est automatiquement le
+numéro de build GitHub Actions, donc les mises à jour s'installent dans le bon ordre.
+
+Supprimer un tag (et donc plus tard sa Release) :
+```bash
+git push --delete origin v1.0.0    # supprime le tag distant
+git tag -d v1.0.0                  # supprime le tag local
+# puis, si besoin, supprimer la Release dans l'onglet "Releases" de GitHub
+```
 
 ## 4. Signature
 

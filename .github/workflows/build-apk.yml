@@ -1,13 +1,17 @@
 name: Build & Release APK
 
-# Compile l'APK ONYX TV et le publie dans une Release GitHub à une URL FIXE :
-#   https://github.com/rosajayz14-boop/onyx/releases/download/tv-latest/onyx-tv.apk
-# Cette URL ne change jamais : elle pointe toujours vers la dernière version publiée,
-# ce qui est idéal pour un code Downloader (aftv.news) créé une seule fois.
+# Compile l'APK ONYX TV et le publie dans des Releases GitHub :
+#  - "tv-latest"  : URL FIXE qui pointe toujours vers la dernière version (idéal Downloader).
+#      https://github.com/rosajayz14-boop/onyx/releases/download/tv-latest/onyx-tv.apk
+#  - "vX.Y.Z"     : Release VERSIONNÉE, créée quand on pousse un tag Git "v*".
+#      https://github.com/rosajayz14-boop/onyx/releases/download/vX.Y.Z/onyx-tv-X.Y.Z.apk
+#
+# Cadencer une version :   git tag v1.0.0 && git push origin v1.0.0
 
 on:
   push:
     branches: ["**"]
+    tags: ["v*"]
     paths-ignore:
       - "**/*.md"
       - "docs/**"
@@ -17,7 +21,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: build-apk
+  group: build-apk-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -45,6 +49,25 @@ jobs:
 
       - name: Grant execute permission for gradlew
         run: chmod +x ./gradlew
+
+      # Détermine la version. Sur un tag "vX.Y.Z" => versionName = X.Y.Z et Release versionnée.
+      # Sinon => build de développement (versionName par défaut), publié seulement dans tv-latest.
+      # versionCode = numéro de run (toujours croissant) pour que les mises à jour s'installent.
+      - name: Determine version
+        id: ver
+        run: |
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            VN="${GITHUB_REF_NAME#v}"
+            echo "is_tag=true"  >> "$GITHUB_OUTPUT"
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          else
+            VN="0.1.0"
+            echo "is_tag=false" >> "$GITHUB_OUTPUT"
+          fi
+          echo "version_name=$VN" >> "$GITHUB_OUTPUT"
+          echo "ONYX_VERSION_NAME=$VN" >> "$GITHUB_ENV"
+          echo "ONYX_VERSION_CODE=${{ github.run_number }}" >> "$GITHUB_ENV"
+          echo "Version: $VN (code ${{ github.run_number }})"
 
       # Clé de signature OPTIONNELLE. Pour une signature stable (mises à jour sans
       # désinstaller), ajoutez dans Settings → Secrets → Actions :
@@ -84,27 +107,45 @@ jobs:
           fi
           mkdir -p dist
           cp "$SRC" dist/onyx-tv.apk
+          cp "$SRC" "dist/onyx-tv-${{ steps.ver.outputs.version_name }}.apk"
           echo "size=$(du -h dist/onyx-tv.apk | cut -f1)" >> "$GITHUB_OUTPUT"
           ls -la dist/
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: onyx-tv-apk
-          path: dist/onyx-tv.apk
+          name: onyx-tv-${{ steps.ver.outputs.version_name }}
+          path: dist/onyx-tv*.apk
           if-no-files-found: error
 
+      # Release "roulante" tv-latest : URL fixe, toujours la dernière version (pour Downloader).
       - name: Publish rolling release (tv-latest)
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release delete tv-latest --yes --cleanup-tag 2>/dev/null || true
           gh release create tv-latest dist/onyx-tv.apk \
-            --title "ONYX TV — dernière version" \
-            --notes "APK pour Android TV / Fire TV / Google TV.
+            --title "ONYX TV — dernière version (${{ steps.ver.outputs.version_name }})" \
+            --notes "APK pour Android TV / Fire TV / Google TV — version ${{ steps.ver.outputs.version_name }}.
 
-          **Installation via Downloader** : ouvrez l'app Downloader sur votre téléviseur et saisissez l'URL :
+          **Installation via Downloader** — URL fixe (ne change jamais) :
           \`https://github.com/${{ github.repository }}/releases/download/tv-latest/onyx-tv.apk\`
 
           Build automatique — commit ${{ github.sha }}." \
             --latest
+
+      # Release VERSIONNÉE : uniquement quand on pousse un tag "vX.Y.Z".
+      - name: Publish versioned release
+        if: steps.ver.outputs.is_tag == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ steps.ver.outputs.tag }}" \
+            "dist/onyx-tv-${{ steps.ver.outputs.version_name }}.apk" \
+            --title "ONYX TV ${{ steps.ver.outputs.version_name }}" \
+            --notes "Version ${{ steps.ver.outputs.version_name }} — Android TV / Fire TV / Google TV.
+
+          **URL directe de cette version :**
+          \`https://github.com/${{ github.repository }}/releases/download/${{ steps.ver.outputs.tag }}/onyx-tv-${{ steps.ver.outputs.version_name }}.apk\`
+
+          Pour toujours la dernière version, utilisez plutôt l'URL fixe \`tv-latest\`."
