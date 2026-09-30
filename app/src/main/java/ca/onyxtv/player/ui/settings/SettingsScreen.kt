@@ -18,6 +18,7 @@ import androidx.compose.material3.MaterialTheme as Md3
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.darkColorScheme as md3DarkColors
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -38,6 +39,7 @@ import ca.onyxtv.player.ui.theme.OnyxLive
 import ca.onyxtv.player.ui.theme.OnyxMuted
 import ca.onyxtv.player.ui.theme.OnyxSurface
 import ca.onyxtv.player.viewmodel.OnyxUiState
+import kotlinx.coroutines.delay
 import ca.onyxtv.player.viewmodel.OnyxViewModel
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -124,7 +126,10 @@ private fun SourceRow(source: PlaylistSource, onRemove: () -> Unit) {
         is PlaylistSource.M3u -> "M3U" to source.url
         is PlaylistSource.Xtream -> "Xtream" to source.server
     }
-    Card(onClick = onRemove, modifier = Modifier.fillMaxWidth()) {
+    // Suppression en deux temps pour éviter un effacement accidentel à la télécommande.
+    var confirm by remember(source.id) { mutableStateOf(false) }
+    LaunchedEffect(confirm) { if (confirm) { delay(6_000); confirm = false } }
+    Card(onClick = { if (confirm) onRemove() else confirm = true }, modifier = Modifier.fillMaxWidth()) {
         Row(
             Modifier.fillMaxWidth().padding(16.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -140,7 +145,11 @@ private fun SourceRow(source: PlaylistSource, onRemove: () -> Unit) {
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            Text("Retirer (OK)", color = OnyxLive, style = MaterialTheme.typography.labelLarge)
+            Text(
+                if (confirm) "Confirmer la suppression ? (OK)" else "Retirer",
+                color = if (confirm) OnyxLive else OnyxMuted,
+                style = MaterialTheme.typography.labelLarge,
+            )
         }
     }
 }
