@@ -167,6 +167,32 @@ fun OnyxRoot(vm: OnyxViewModel = viewModel()) {
             }
         }
 
+        // Mise à jour de l'application disponible : proposition à l'ouverture (une fois par version).
+        val update by vm.update.collectAsStateWithLifecycle()
+        var dismissedUpdate by remember { mutableStateOf<String?>(null) }
+        val pending = update.info?.takeIf { it.commit != dismissedUpdate }
+        if (pending != null && playing == null && openDetail == null) {
+            Box(Modifier.fillMaxSize().background(Color(0xCC050509)), contentAlignment = Alignment.Center) {
+                Column(
+                    Modifier.width(560.dp).background(OnyxBg2).padding(28.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Text("✨ Nouvelle version d'ONYX TV", style = MaterialTheme.typography.headlineMedium)
+                    Text(pending.label, color = OnyxMuted)
+                    update.downloading?.let { p -> Text("Téléchargement… ${(p * 100).toInt()} %", color = MaterialTheme.colorScheme.secondary) }
+                    update.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        when {
+                            update.readyFile != null -> androidx.tv.material3.Button(onClick = { vm.installUpdate() }) { Text("📦 Installer") }
+                            update.downloading == null -> androidx.tv.material3.Button(onClick = { vm.downloadAndInstallUpdate() }) { Text("⬇ Installer maintenant") }
+                        }
+                        androidx.tv.material3.Button(onClick = { dismissedUpdate = pending.commit }) { Text("Plus tard") }
+                    }
+                    Text("L'installation se fait sans quitter l'app. Vos comptes, favoris et réglages sont conservés.", color = OnyxMuted, style = MaterialTheme.typography.bodyMedium)
+                }
+            }
+        }
+
         // Horloge discrète (mise à jour chaque 30 s), masquée pendant la lecture.
         if (playing == null) {
             var now by remember { mutableStateOf(System.currentTimeMillis()) }
