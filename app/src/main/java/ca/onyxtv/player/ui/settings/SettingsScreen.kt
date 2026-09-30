@@ -202,8 +202,9 @@ private fun Field(
         onValueChange = onValue,
         label = { androidx.compose.material3.Text(label) },
         singleLine = true,
-        // Sans autocorrection : les claviers TV affichent alors un clavier « brut » avec chiffres.
-        keyboardOptions = KeyboardOptions(keyboardType = keyboard, autoCorrect = false),
+        // Sans autocorrection (clavier « brut » avec chiffres) et SANS ouverture automatique du
+        // clavier au simple passage du focus : il s'ouvre quand on appuie sur OK dans le champ.
+        keyboardOptions = KeyboardOptions(keyboardType = keyboard, autoCorrect = false, showKeyboardOnFocus = false),
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 6.dp),

@@ -247,7 +247,7 @@ private fun UpdateScreen(
     onLater: () -> Unit,
 ) {
     val laterFocus = remember { androidx.compose.ui.focus.FocusRequester() }
-    LaunchedEffect(Unit) { runCatching { laterFocus.requestFocus() } }
+    LaunchedEffect(Unit) { repeat(3) { delay(120); if (runCatching { laterFocus.requestFocus() }.isSuccess) return@LaunchedEffect } }
     androidx.activity.compose.BackHandler(enabled = true) { onLater() }
     Box(Modifier.fillMaxSize().background(OnyxBg), contentAlignment = Alignment.Center) {
         Column(

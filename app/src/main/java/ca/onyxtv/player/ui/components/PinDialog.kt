@@ -22,6 +22,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -46,6 +47,10 @@ fun PinDialog(
 ) {
     var pin by remember { mutableStateOf("") }
     var wrong by remember { mutableStateOf(false) }
+    val fieldFocus = remember { androidx.compose.ui.focus.FocusRequester() }
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        repeat(3) { kotlinx.coroutines.delay(120); if (runCatching { fieldFocus.requestFocus() }.isSuccess) return@LaunchedEffect }
+    }
 
     BackHandler(enabled = onCancel != null) { onCancel?.invoke() }
 
@@ -71,8 +76,9 @@ fun PinDialog(
                     onValueChange = { v -> if (v.length <= 4 && v.all { it.isDigit() }) { pin = v; wrong = false } },
                     label = { androidx.compose.material3.Text("Code PIN (4 chiffres)") },
                     singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword, showKeyboardOnFocus = false),
                     visualTransformation = PasswordVisualTransformation(),
+                    modifier = Modifier.focusRequester(fieldFocus),
                 )
             }
             if (wrong) Text("Code incorrect.", color = OnyxLive)

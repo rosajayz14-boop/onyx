@@ -10,7 +10,9 @@ import ca.onyxtv.player.core.model.SeriesDetail
 import ca.onyxtv.player.core.model.VodItem
 import ca.onyxtv.player.core.net.Http
 import ca.onyxtv.player.core.xtream.XtreamClient
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.withLock
@@ -31,7 +33,9 @@ class OnyxRepository(
      * par source (comptes et erreur éventuelle). Une source en échec n'empêche pas les autres.
      * [onProgress] reçoit des messages d'avancement pour l'UI.
      */
-    suspend fun loadCatalog(onProgress: (String) -> Unit = {}): CatalogSnapshot = coroutineScope {
+    suspend fun loadCatalog(onProgress: (String) -> Unit = {}): CatalogSnapshot = withContext(Dispatchers.Default) { loadCatalogInner(onProgress) }
+
+    private suspend fun loadCatalogInner(onProgress: (String) -> Unit): CatalogSnapshot = coroutineScope {
         val sources = store.sources.first()
         if (sources.isEmpty()) return@coroutineScope CatalogSnapshot(updatedAt = System.currentTimeMillis())
 
@@ -140,7 +144,8 @@ class OnyxRepository(
                 val src = sources.filterIsInstance<PlaylistSource.Xtream>().firstOrNull { it.id == sourceId }
                     ?: return@run emptyList()
                 val fromXmltv = channel.epgChannelId?.takeIf { it.isNotBlank() }?.let { epgId ->
-                    xmltv(xt.xmltvUrl(src)).filter { it.channelId.equals(epgId, ignoreCase = true) }
+                    val all = xmltv(xt.xmltvUrl(src))
+                    withContext(Dispatchers.Default) { all.filter { it.channelId.equals(epgId, ignoreCase = true) } }
                 }.orEmpty()
                 if (fromXmltv.isNotEmpty()) return@run fromXmltv.sortedBy { it.start }
                 return@run runCatching { xt.shortEpg(src, sid, limit = 30) }.getOrDefault(emptyList())
@@ -149,7 +154,8 @@ class OnyxRepository(
             val epgId = channel.epgChannelId ?: return@run emptyList()
             val m3u = sources.filterIsInstance<PlaylistSource.M3u>().firstOrNull { !it.epgUrl.isNullOrBlank() }
                 ?: return@run emptyList()
-            xmltv(m3u.epgUrl!!).filter { it.channelId.equals(epgId, ignoreCase = true) }.sortedBy { it.start }
+            val all = xmltv(m3u.epgUrl!!)
+            withContext(Dispatchers.Default) { all.filter { it.channelId.equals(epgId, ignoreCase = true) }.sortedBy { it.start } }
         }
         synchronized(epgByChannel) { epgByChannel[channel.id] = Cached(now, result) }
         return result
@@ -176,7 +182,7 @@ class OnyxRepository(
                 val disk = epgFile(url)
                 if (disk != null && disk.exists() && now - disk.lastModified() < XMLTV_TTL_MS) {
                     val fromDisk = runCatching {
-                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { epgJson.decodeFromString(epgListSer, disk.readText()) }
+                        withContext(Dispatchers.IO) { epgJson.decodeFromString(epgListSer, disk.readText()) }
                     }.getOrNull()
                     if (fromDisk != null) {
                         synchronized(xmltvByUrl) { xmltvByUrl[url] = Cached(disk.lastModified(), fromDisk) }
@@ -191,16 +197,20 @@ class OnyxRepository(
                     val file = java.io.File(dir, "epg-${url.hashCode()}.xml")
                     try {
                         Http.getToFile(url, file)
-                        file.inputStream().buffered().use { XmltvParser.parse(it, now - 6 * 3_600_000L, now + 48 * 3_600_000L) }
+                        withContext(Dispatchers.IO) {
+                            file.inputStream().buffered().use { XmltvParser.parse(it, now - 6 * 3_600_000L, now + 48 * 3_600_000L) }
+                        }
                     } finally { file.delete() }
                 } else {
-                    Http.getBytes(url).inputStream().use { XmltvParser.parse(it, now - 6 * 3_600_000L, now + 48 * 3_600_000L) }
+                    withContext(Dispatchers.IO) {
+                        Http.getBytes(url).inputStream().use { XmltvParser.parse(it, now - 6 * 3_600_000L, now + 48 * 3_600_000L) }
+                    }
                 }
             }.getOrDefault(emptyList())
             if (parsed.isNotEmpty()) {
                 synchronized(xmltvByUrl) { xmltvByUrl[url] = Cached(now, parsed) }
                 runCatching {
-                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    withContext(Dispatchers.IO) {
                         epgFile(url)?.writeText(epgJson.encodeToString(epgListSer, parsed))
                     }
                 }

@@ -21,6 +21,8 @@ import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.decodeFromStream
 import java.io.File
 import java.net.URLEncoder
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /**
  * Client de l'API Xtream Codes (player_api.php).
@@ -212,7 +214,11 @@ class XtreamClient(
     }
 
     /** Fiche d'un film : résumé, casting, note, bande-annonce (get_vod_info). */
-    suspend fun movieInfo(src: PlaylistSource.Xtream, streamId: String): MovieDetail {
+    suspend fun movieInfo(src: PlaylistSource.Xtream, streamId: String): MovieDetail = withContext(Dispatchers.IO) {
+        movieInfoBlocking(src, streamId)
+    }
+
+    private suspend fun movieInfoBlocking(src: PlaylistSource.Xtream, streamId: String): MovieDetail {
         val root = json.parseToJsonElement(Http.get(api(src, "get_vod_info", "&vod_id=$streamId"))) as? JsonObject
             ?: return MovieDetail()
         val info = root["info"] as? JsonObject ?: return MovieDetail()
@@ -268,7 +274,13 @@ class XtreamClient(
      * catalogue. Une réponse qui n'est pas un tableau (ex. erreur d'auth en objet) lève.
      */
     @OptIn(ExperimentalSerializationApi::class)
-    private suspend inline fun <reified T> getList(url: String): List<T> {
+    private suspend inline fun <reified T> getList(url: String): List<T> = withContext(Dispatchers.IO) {
+        getListBlocking<T>(url)
+    }
+
+    /** Décodage TOUJOURS hors du fil principal (voir getList) : un catalogue peut faire 50 Mo. */
+    @OptIn(ExperimentalSerializationApi::class)
+    private suspend inline fun <reified T> getListBlocking(url: String): List<T> {
         val dir = Http.tempDir
         if (dir == null) {
             // Pas de dossier temporaire (tests) : chemin mémoire.
@@ -300,6 +312,7 @@ class XtreamClient(
         return array.mapNotNull { el -> runCatching { json.decodeFromJsonElement<T>(el) }.getOrNull() }
     }
 
-    private suspend inline fun <reified T> getOne(url: String): T =
-        json.decodeFromString(Http.get(url))
+    private suspend inline fun <reified T> getOne(url: String): T = withContext(Dispatchers.IO) {
+        json.decodeFromString<T>(Http.get(url))
+    }
 }
