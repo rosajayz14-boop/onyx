@@ -33,11 +33,13 @@ import androidx.compose.foundation.focusGroup
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.input.InputMode
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalInputModeManager
-import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -140,23 +142,17 @@ fun OnyxRoot(vm: OnyxViewModel = viewModel()) {
         onDispose { lifecycleOwner.lifecycle.removeObserver(obs) }
     }
 
-    // Focus automatique dans le contenu : à chaque changement de page et au retour d'une fiche /
-    // du lecteur, le focus est placé (ou restauré) dans la page → les flèches marchent tout de
-    // suite, sans avoir à appuyer sur OK.
+    // Focus : approche minimale et sûre. Mode télécommande demandé UNE fois au démarrage ; un
+    // filet de sécurité place le focus dans la page si une flèche arrive alors que rien n'a le focus.
     val contentFocus = remember { FocusRequester() }
-    // Mode « clavier/télécommande » forcé : en mode tactile (hérité de l'installateur système
-    // après une mise à jour dans l'app), Compose MASQUE le surlignage du focus.
     val inputModeManager = LocalInputModeManager.current
-    val windowInfo = LocalWindowInfo.current
-    fun focusContent() {
-        inputModeManager.requestInputMode(InputMode.Keyboard)
+    var contentHasFocus by remember { mutableStateOf(false) }
+    var lastKey by remember { mutableStateOf("—") }
+    var keyCount by remember { mutableStateOf(0) }
+    LaunchedEffect(Unit) {
+        delay(300)
+        runCatching { inputModeManager.requestInputMode(InputMode.Keyboard) }
         runCatching { contentFocus.requestFocus() }
-    }
-    LaunchedEffect(dest, windowInfo.isWindowFocused) {
-        if (windowInfo.isWindowFocused) { delay(150); focusContent() }
-    }
-    LaunchedEffect(playing, openDetail) {
-        if (playing == null && openDetail == null) { delay(150); focusContent() }
     }
 
     // Tant qu'une fiche (film/série) ou le lecteur est ouvert, le contenu en dessous ne doit
@@ -167,10 +163,15 @@ fun OnyxRoot(vm: OnyxViewModel = viewModel()) {
         Modifier
             .fillMaxSize()
             .background(OnyxBg)
-            // Toute touche de la télécommande garantit le mode clavier (focus visible).
             .onPreviewKeyEvent { ev ->
-                if (ev.type == KeyEventType.KeyDown) inputModeManager.requestInputMode(InputMode.Keyboard)
-                false
+                if (ev.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                lastKey = ev.key.toString().removePrefix("Key: "); keyCount++
+                val isArrow = ev.key == Key.DirectionUp || ev.key == Key.DirectionDown ||
+                    ev.key == Key.DirectionLeft || ev.key == Key.DirectionRight
+                // Filet de sécurité : une flèche alors que rien n'a le focus → focus dans la page.
+                if (isArrow && !contentHasFocus && playing == null && openDetail == null) {
+                    runCatching { contentFocus.requestFocus() }.isSuccess
+                } else false
             }
     ) {
         Box(Modifier.fillMaxSize().focusProperties { canFocus = !overlayOpen }) {
@@ -220,10 +221,10 @@ fun OnyxRoot(vm: OnyxViewModel = viewModel()) {
             Box(
                 Modifier
                     .fillMaxSize()
+                    .onFocusChanged { contentHasFocus = it.hasFocus }
                     .focusRequester(contentFocus)
                     // focusRestorer() volontairement absent : bug Compose 1.7 avec les listes
-                    // (« Release should only be called once » → plantage). Le focus va au premier
-                    // élément de la page, ce qui suffit.
+                    // (« Release should only be called once » → plantage).
                     .focusGroup()
             ) {
                 when (dest) {
@@ -240,6 +241,17 @@ fun OnyxRoot(vm: OnyxViewModel = viewModel()) {
         }
 
         } // fin du contenu focalisable
+
+        // Cadre de diagnostic (Réglages → Application → Mode diagnostic).
+        if (prefs.diagnostics) {
+            Text(
+                "DIAG · page ${dest.name} · touche $lastKey (#$keyCount) · focus page ${if (contentHasFocus) "OUI" else "NON"}" +
+                    " · mode ${inputModeManager.inputMode} · lecteur ${if (playing != null) "ouvert" else "fermé"}",
+                style = MaterialTheme.typography.bodyMedium,
+                color = Color.White,
+                modifier = Modifier.align(Alignment.BottomStart).padding(12.dp).background(Color(0xCC000000)).padding(8.dp),
+            )
+        }
 
         // Horloge discrète (mise à jour chaque 30 s), masquée pendant la lecture.
         if (playing == null) {
@@ -288,9 +300,8 @@ private fun UpdateScreen(
     onLater: () -> Unit,
 ) {
     val laterFocus = remember { androidx.compose.ui.focus.FocusRequester() }
-    val imm = LocalInputModeManager.current
     LaunchedEffect(Unit) {
-        repeat(3) { delay(120); imm.requestInputMode(InputMode.Keyboard); if (runCatching { laterFocus.requestFocus() }.isSuccess) return@LaunchedEffect }
+        repeat(3) { delay(120); if (runCatching { laterFocus.requestFocus() }.isSuccess) return@LaunchedEffect }
     }
     androidx.activity.compose.BackHandler(enabled = true) { onLater() }
     Box(Modifier.fillMaxSize().background(OnyxBg), contentAlignment = Alignment.Center) {

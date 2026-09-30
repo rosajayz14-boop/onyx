@@ -144,6 +144,10 @@ class OnyxViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { userStore.updatePrefs { it.copy(resumeOnStart = enabled) } }
     }
 
+    fun setDiagnostics(enabled: Boolean) {
+        viewModelScope.launch { userStore.updatePrefs { it.copy(diagnostics = enabled) } }
+    }
+
     fun setSeekSteps(back: Int, forward: Int) {
         viewModelScope.launch { userStore.updatePrefs { it.copy(seekBackSeconds = back, seekForwardSeconds = forward) } }
     }

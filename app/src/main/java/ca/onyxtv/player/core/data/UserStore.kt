@@ -59,6 +59,8 @@ data class AppPrefs(
     /** Pas de recul / d'avance avec ◀ / ▶ (secondes). */
     val seekBackSeconds: Int = 10,
     val seekForwardSeconds: Int = 30,
+    /** Affiche un cadre de diagnostic (touches reçues, focus) pour le dépannage. */
+    val diagnostics: Boolean = false,
 )
 
 /**

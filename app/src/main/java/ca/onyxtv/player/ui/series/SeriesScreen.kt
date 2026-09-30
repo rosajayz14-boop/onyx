@@ -124,9 +124,8 @@ private fun SeriesContent(
 
     var season by remember(detail) { mutableIntStateOf(nextUp?.season ?: seasons.first()) }
     val playFocus = remember { androidx.compose.ui.focus.FocusRequester() }
-    val imm = androidx.compose.ui.platform.LocalInputModeManager.current
     androidx.compose.runtime.LaunchedEffect(detail) {
-        repeat(3) { kotlinx.coroutines.delay(100); imm.requestInputMode(androidx.compose.ui.input.InputMode.Keyboard); if (runCatching { playFocus.requestFocus() }.isSuccess) return@LaunchedEffect }
+        repeat(3) { kotlinx.coroutines.delay(100); if (runCatching { playFocus.requestFocus() }.isSuccess) return@LaunchedEffect }
     }
     val episodes = detail.seasons[season].orEmpty()
 

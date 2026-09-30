@@ -332,8 +332,7 @@ fun PlayerScreen(
         }
     }
 
-    val imm = androidx.compose.ui.platform.LocalInputModeManager.current
-    LaunchedEffect(Unit) { imm.requestInputMode(androidx.compose.ui.input.InputMode.Keyboard); runCatching { focus.requestFocus() } }
+    LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
     LaunchedEffect(panelOpen) { if (panelOpen) runCatching { panelFocus.requestFocus() } else runCatching { focus.requestFocus() } }
 
     BackHandler(enabled = true) { if (panelOpen) panelOpen = false else onExit() }

@@ -48,9 +48,8 @@ fun PinDialog(
     var pin by remember { mutableStateOf("") }
     var wrong by remember { mutableStateOf(false) }
     val fieldFocus = remember { androidx.compose.ui.focus.FocusRequester() }
-    val imm = androidx.compose.ui.platform.LocalInputModeManager.current
     androidx.compose.runtime.LaunchedEffect(Unit) {
-        repeat(3) { kotlinx.coroutines.delay(120); imm.requestInputMode(androidx.compose.ui.input.InputMode.Keyboard); if (runCatching { fieldFocus.requestFocus() }.isSuccess) return@LaunchedEffect }
+        repeat(3) { kotlinx.coroutines.delay(120); if (runCatching { fieldFocus.requestFocus() }.isSuccess) return@LaunchedEffect }
     }
 
     BackHandler(enabled = onCancel != null) { onCancel?.invoke() }

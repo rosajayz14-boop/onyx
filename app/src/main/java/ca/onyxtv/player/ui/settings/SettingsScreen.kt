@@ -400,6 +400,10 @@ private fun AppCard(vm: OnyxViewModel) {
                 Text(if (update.checking) "Vérification…" else "Vérifier les mises à jour")
             }
         }
+        val prefsDiag by vm.prefs.collectAsStateWithLifecycle()
+        Button(onClick = { vm.setDiagnostics(!prefsDiag.diagnostics) }, modifier = Modifier.padding(top = 8.dp)) {
+            Text("Mode diagnostic (cadre touches/focus à l'écran) : ${if (prefsDiag.diagnostics) "Activé" else "Désactivé"}")
+        }
         vm.lastCrash?.let { crash ->
             Text("⚠ Dernier plantage enregistré :", color = OnyxLive, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 12.dp))
             Text(crash.lines().take(8).joinToString("\n"), color = OnyxMuted, style = MaterialTheme.typography.bodyMedium, maxLines = 8, overflow = TextOverflow.Ellipsis)
