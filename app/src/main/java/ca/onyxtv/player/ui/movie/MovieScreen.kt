@@ -74,7 +74,10 @@ fun MovieScreen(
         value = runCatching { vm.movieDetail(item) }.getOrNull() ?: MovieDetail(plot = item.plot)
     }
     val playFocus = remember { androidx.compose.ui.focus.FocusRequester() }
-    androidx.compose.runtime.LaunchedEffect(item.id) { kotlinx.coroutines.delay(80); runCatching { playFocus.requestFocus() } }
+    val imm = androidx.compose.ui.platform.LocalInputModeManager.current
+    androidx.compose.runtime.LaunchedEffect(item.id) {
+        repeat(3) { kotlinx.coroutines.delay(100); imm.requestInputMode(androidx.compose.ui.input.InputMode.Keyboard); if (runCatching { playFocus.requestFocus() }.isSuccess) return@LaunchedEffect }
+    }
     val recent = recents.firstOrNull { it.id == item.id && it.resumable }
     val seen = recents.any { it.id == item.id && it.finished }
 

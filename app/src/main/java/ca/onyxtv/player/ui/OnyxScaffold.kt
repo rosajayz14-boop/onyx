@@ -33,6 +33,12 @@ import androidx.compose.foundation.focusGroup
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRestorer
+import androidx.compose.ui.input.InputMode
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.platform.LocalInputModeManager
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -139,9 +145,19 @@ fun OnyxRoot(vm: OnyxViewModel = viewModel()) {
     // du lecteur, le focus est placé (ou restauré) dans la page → les flèches marchent tout de
     // suite, sans avoir à appuyer sur OK.
     val contentFocus = remember { FocusRequester() }
-    LaunchedEffect(dest) { delay(150); runCatching { contentFocus.requestFocus() } }
+    // Mode « clavier/télécommande » forcé : en mode tactile (hérité de l'installateur système
+    // après une mise à jour dans l'app), Compose MASQUE le surlignage du focus.
+    val inputModeManager = LocalInputModeManager.current
+    val windowInfo = LocalWindowInfo.current
+    fun focusContent() {
+        inputModeManager.requestInputMode(InputMode.Keyboard)
+        runCatching { contentFocus.requestFocus() }
+    }
+    LaunchedEffect(dest, windowInfo.isWindowFocused) {
+        if (windowInfo.isWindowFocused) { delay(150); focusContent() }
+    }
     LaunchedEffect(playing, openDetail) {
-        if (playing == null && openDetail == null) { delay(150); runCatching { contentFocus.requestFocus() } }
+        if (playing == null && openDetail == null) { delay(150); focusContent() }
     }
 
     // Tant qu'une fiche (film/série) ou le lecteur est ouvert, le contenu en dessous ne doit
@@ -152,6 +168,11 @@ fun OnyxRoot(vm: OnyxViewModel = viewModel()) {
         Modifier
             .fillMaxSize()
             .background(OnyxBg)
+            // Toute touche de la télécommande garantit le mode clavier (focus visible).
+            .onPreviewKeyEvent { ev ->
+                if (ev.type == KeyEventType.KeyDown) inputModeManager.requestInputMode(InputMode.Keyboard)
+                false
+            }
     ) {
         Box(Modifier.fillMaxSize().focusProperties { canFocus = !overlayOpen }) {
         NavigationDrawer(
@@ -266,7 +287,10 @@ private fun UpdateScreen(
     onLater: () -> Unit,
 ) {
     val laterFocus = remember { androidx.compose.ui.focus.FocusRequester() }
-    LaunchedEffect(Unit) { repeat(3) { delay(120); if (runCatching { laterFocus.requestFocus() }.isSuccess) return@LaunchedEffect } }
+    val imm = LocalInputModeManager.current
+    LaunchedEffect(Unit) {
+        repeat(3) { delay(120); imm.requestInputMode(InputMode.Keyboard); if (runCatching { laterFocus.requestFocus() }.isSuccess) return@LaunchedEffect }
+    }
     androidx.activity.compose.BackHandler(enabled = true) { onLater() }
     Box(Modifier.fillMaxSize().background(OnyxBg), contentAlignment = Alignment.Center) {
         Column(
