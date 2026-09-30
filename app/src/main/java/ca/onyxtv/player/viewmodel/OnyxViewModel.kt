@@ -321,6 +321,10 @@ class OnyxViewModel(app: Application) : AndroidViewModel(app) {
     fun refreshEpg() {
         repo.clearEpg()
         _state.update { it.copy(epgVersion = it.epgVersion + 1) }
+        viewModelScope.launch {
+            runCatching { repo.refreshEpgFromNetwork() }
+            _state.update { it.copy(epgVersion = it.epgVersion + 1) }
+        }
     }
 
     fun addM3u(label: String, url: String, epgUrl: String?) {

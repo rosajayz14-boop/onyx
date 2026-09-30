@@ -319,13 +319,13 @@ private fun UpdateCard(vm: OnyxViewModel, state: OnyxUiState) {
         Spacer(Modifier.height(10.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Button(onClick = { vm.refresh() }) { Text(if (state.loading) "Mise à jour…" else "🔄 Tout mettre à jour") }
-            Button(onClick = { vm.refreshEpg(); epgNote = "Guide vidé : il sera retéléchargé à l'affichage des chaînes." }) {
+            Button(onClick = { vm.refreshEpg(); epgNote = "Guide en cours de rechargement depuis le serveur…" }) {
                 Text("🗓 Mettre à jour le guide (EPG)")
             }
         }
         epgNote?.let { Text(it, color = OnyxCyan, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 8.dp)) }
         Text(
-            "Le catalogue est rafraîchi automatiquement à l'ouverture s'il date de plus de 6 h ; le guide est mis en cache 30 min.",
+            "Liste de lecture ET guide TV sont mis à jour automatiquement une fois par jour, en arrière-plan, et à l'ouverture si les données datent de plus de 24 h.",
             color = OnyxMuted, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 8.dp),
         )
     }

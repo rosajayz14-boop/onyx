@@ -85,6 +85,7 @@ data class SeriesDetail(
 }
 
 /** Un programme du guide (EPG). Horodatage en millisecondes epoch. */
+@Serializable
 data class EpgProgram(
     val channelId: String,        // correspond à Channel.epgChannelId
     val title: String,

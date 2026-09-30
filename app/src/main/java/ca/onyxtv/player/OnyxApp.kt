@@ -24,6 +24,7 @@ class OnyxApp : Application(), ImageLoaderFactory {
         super.onCreate()
         installCrashLogger()
         ca.onyxtv.player.core.net.Http.tempDir = cacheDir.resolve("net")
+        ca.onyxtv.player.core.net.Http.dataDir = filesDir
         // Au démarrage du processus, aucun enregistrement ne peut être en cours :
         // les entrées restées « RECORDING » (coupure, crash) sont clôturées proprement.
         appScope.launch { runCatching { RecordingStore(this@OnyxApp).markInterrupted() } }

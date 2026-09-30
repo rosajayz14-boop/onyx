@@ -28,6 +28,8 @@ class CatalogRefreshWorker(context: Context, params: WorkerParameters) : Corouti
             val snapshot = repo.loadCatalog()
             if (snapshot.isEmpty && snapshot.reports.isEmpty()) return Result.success() // aucune source
             if (snapshot.reports.all { it.error == null } && !snapshot.isEmpty) cache.save(snapshot)
+            // Guide TV : retéléchargé chaque jour, stocké sur disque pour l'ouverture suivante.
+            runCatching { repo.refreshEpgFromNetwork() }
             Result.success()
         }.getOrElse { Result.retry() }
     }

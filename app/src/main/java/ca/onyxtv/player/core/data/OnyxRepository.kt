@@ -95,10 +95,33 @@ class OnyxRepository(
     private val epgByChannel = HashMap<String, Cached<List<EpgProgram>>>()
     private val xmltvByUrl = HashMap<String, Cached<List<EpgProgram>>>()
 
-    /** Vide les caches EPG : le prochain affichage retélécharge le guide. */
+    /** Vide les caches EPG (mémoire + disque) : le prochain affichage retélécharge le guide. */
     fun clearEpg() {
         synchronized(epgByChannel) { epgByChannel.clear() }
         synchronized(xmltvByUrl) { xmltvByUrl.clear() }
+        runCatching { epgDir()?.listFiles()?.forEach { it.delete() } }
+    }
+
+    private fun epgDir(): java.io.File? = Http.dataDir?.resolve("epg")?.apply { mkdirs() }
+    private fun epgFile(url: String): java.io.File? = epgDir()?.resolve("epg-${url.hashCode()}.json")
+    private val epgJson = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
+    private val epgListSer = kotlinx.serialization.builtins.ListSerializer(EpgProgram.serializer())
+
+    /** Toutes les URL de guide des sources configurées (xmltv.php des comptes + EPG des M3U). */
+    private suspend fun epgUrls(): List<String> = store.sources.first().mapNotNull { s ->
+        when (s) {
+            is PlaylistSource.Xtream -> xt.xmltvUrl(s)
+            is PlaylistSource.M3u -> s.epgUrl?.takeIf { it.isNotBlank() }
+        }
+    }
+
+    /**
+     * Rafraîchit le guide depuis le réseau pour toutes les sources (appelé par la tâche
+     * quotidienne en arrière-plan et par « Mettre à jour le guide »). Résultat sur disque.
+     */
+    suspend fun refreshEpgFromNetwork() {
+        synchronized(epgByChannel) { epgByChannel.clear() }
+        epgUrls().forEach { url -> runCatching { xmltv(url, force = true) } }
     }
 
     /** Guide (now/next) pour une chaîne. Xtream via short_epg ; M3U via XMLTV. Mis en cache. */
@@ -139,13 +162,28 @@ class OnyxRepository(
      * [maintenant − 6 h ; + 36 h] : mémoire maîtrisée même avec des guides de 100 Mo.
      * Un seul téléchargement à la fois par URL (les écrans demandent l'EPG en parallèle).
      */
-    private suspend fun xmltv(url: String): List<EpgProgram> {
+    private suspend fun xmltv(url: String, force: Boolean = false): List<EpgProgram> {
         val now = System.currentTimeMillis()
-        synchronized(xmltvByUrl) { xmltvByUrl[url] }
-            ?.takeIf { now - it.at < XMLTV_TTL_MS }
-            ?.let { return it.value }
+        if (!force) {
+            synchronized(xmltvByUrl) { xmltvByUrl[url] }
+                ?.takeIf { now - it.at < XMLTV_TTL_MS }
+                ?.let { return it.value }
+        }
         return xmltvMutex.withLock {
-            synchronized(xmltvByUrl) { xmltvByUrl[url] }?.takeIf { now - it.at < XMLTV_TTL_MS }?.let { return@withLock it.value }
+            if (!force) {
+                synchronized(xmltvByUrl) { xmltvByUrl[url] }?.takeIf { now - it.at < XMLTV_TTL_MS }?.let { return@withLock it.value }
+                // Cache disque (rempli par la mise à jour quotidienne) : ouverture instantanée.
+                val disk = epgFile(url)
+                if (disk != null && disk.exists() && now - disk.lastModified() < XMLTV_TTL_MS) {
+                    val fromDisk = runCatching {
+                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { epgJson.decodeFromString(epgListSer, disk.readText()) }
+                    }.getOrNull()
+                    if (fromDisk != null) {
+                        synchronized(xmltvByUrl) { xmltvByUrl[url] = Cached(disk.lastModified(), fromDisk) }
+                        return@withLock fromDisk
+                    }
+                }
+            }
             val parsed = runCatching {
                 val dir = Http.tempDir
                 if (dir != null) {
@@ -153,13 +191,20 @@ class OnyxRepository(
                     val file = java.io.File(dir, "epg-${url.hashCode()}.xml")
                     try {
                         Http.getToFile(url, file)
-                        file.inputStream().buffered().use { XmltvParser.parse(it, now - 6 * 3_600_000L, now + 36 * 3_600_000L) }
+                        file.inputStream().buffered().use { XmltvParser.parse(it, now - 6 * 3_600_000L, now + 48 * 3_600_000L) }
                     } finally { file.delete() }
                 } else {
-                    Http.getBytes(url).inputStream().use { XmltvParser.parse(it, now - 6 * 3_600_000L, now + 36 * 3_600_000L) }
+                    Http.getBytes(url).inputStream().use { XmltvParser.parse(it, now - 6 * 3_600_000L, now + 48 * 3_600_000L) }
                 }
             }.getOrDefault(emptyList())
-            synchronized(xmltvByUrl) { xmltvByUrl[url] = Cached(now, parsed) }
+            if (parsed.isNotEmpty()) {
+                synchronized(xmltvByUrl) { xmltvByUrl[url] = Cached(now, parsed) }
+                runCatching {
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        epgFile(url)?.writeText(epgJson.encodeToString(epgListSer, parsed))
+                    }
+                }
+            }
             parsed
         }
     }
@@ -205,6 +250,6 @@ class OnyxRepository(
 
     private companion object {
         const val EPG_TTL_MS = 30 * 60_000L        // now/next Xtream : 30 min
-        const val XMLTV_TTL_MS = 6 * 3_600_000L    // fichier XMLTV : 6 h
+        const val XMLTV_TTL_MS = 24 * 3_600_000L   // guide XMLTV : une fois par jour
     }
 }

@@ -26,6 +26,9 @@ object Http {
     /** Dossier temporaire pour les grosses réponses (défini au démarrage de l'app). */
     @Volatile var tempDir: java.io.File? = null
 
+    /** Dossier permanent de l'app (cache disque du guide), défini au démarrage. */
+    @Volatile var dataDir: java.io.File? = null
+
     /** Télécharge en flux vers [file] (mémoire constante, quelle que soit la taille). */
     suspend fun getToFile(url: String, file: java.io.File): java.io.File = withContext(Dispatchers.IO) {
         val request = Request.Builder().url(url).header("User-Agent", UA).build()
