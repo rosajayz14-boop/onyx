@@ -21,7 +21,10 @@ import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Today
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
+import androidx.compose.foundation.layout.BoxScope
 import kotlinx.coroutines.delay
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -34,11 +37,6 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.input.InputMode
 import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.input.key.Key
-import androidx.compose.ui.input.key.KeyEventType
-import androidx.compose.ui.input.key.key
-import androidx.compose.ui.input.key.onPreviewKeyEvent
-import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalInputModeManager
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
@@ -97,7 +95,7 @@ fun OnyxRoot(vm: OnyxViewModel = viewModel()) {
     val parental by vm.parental.collectAsStateWithLifecycle()
     val appUnlocked by vm.appUnlocked.collectAsStateWithLifecycle()
     if (parental.enabled && parental.lockAtStart && !appUnlocked) {
-        Box(Modifier.fillMaxSize().background(OnyxBg)) {
+        FocusRoot {
             PinDialog(
                 title = "ONYX TV est verrouillé",
                 subtitle = "Entrez votre code PIN pour continuer.",
@@ -112,14 +110,16 @@ fun OnyxRoot(vm: OnyxViewModel = viewModel()) {
     var dismissedUpdate by remember { mutableStateOf<String?>(null) }
     val pendingUpdate = update.info?.takeIf { it.commit != dismissedUpdate }
     if (pendingUpdate != null && playing == null && openDetail == null) {
-        UpdateScreen(
-            label = pendingUpdate.label,
-            downloading = update.downloading,
-            ready = update.readyFile != null,
-            error = update.error,
-            onInstall = { if (update.readyFile != null) vm.installUpdate() else vm.downloadAndInstallUpdate() },
-            onLater = { dismissedUpdate = pendingUpdate.commit },
-        )
+        FocusRoot {
+            UpdateScreen(
+                label = pendingUpdate.label,
+                downloading = update.downloading,
+                ready = update.readyFile != null,
+                error = update.error,
+                onInstall = { if (update.readyFile != null) vm.installUpdate() else vm.downloadAndInstallUpdate() },
+                onLater = { dismissedUpdate = pendingUpdate.commit },
+            )
+        }
         return
     }
 
@@ -142,38 +142,61 @@ fun OnyxRoot(vm: OnyxViewModel = viewModel()) {
         onDispose { lifecycleOwner.lifecycle.removeObserver(obs) }
     }
 
-    // Focus : approche minimale et sûre. Mode télécommande demandé UNE fois au démarrage ; un
-    // filet de sécurité place le focus dans la page si une flèche arrive alors que rien n'a le focus.
+    // Focus. Trois cibles possibles : la page, la fiche (film/série), le lecteur. Le pont
+    // FocusBridge permet à l'Activity de replacer le focus quand une touche arrive alors que
+    // rien n'est sélectionné (blocage connu de Compose 1.7 : la vue garde le focus système
+    // sans composant sélectionné → les flèches ne font rien).
     val contentFocus = remember { FocusRequester() }
+    val detailFocus = remember { FocusRequester() }
+    val playerFocus = remember { FocusRequester() }
     val inputModeManager = LocalInputModeManager.current
-    var contentHasFocus by remember { mutableStateOf(false) }
-    var lastKey by remember { mutableStateOf("—") }
-    var keyCount by remember { mutableStateOf(0) }
-    LaunchedEffect(Unit) {
-        delay(300)
-        runCatching { inputModeManager.requestInputMode(InputMode.Keyboard) }
-        runCatching { contentFocus.requestFocus() }
-    }
-
-    // Tant qu'une fiche (film/série) ou le lecteur est ouvert, le contenu en dessous ne doit
-    // JAMAIS recevoir le focus de la télécommande (sinon les touches agissent sur l'écran caché).
+    var rootHasFocus by remember { mutableStateOf(false) }
     val overlayOpen = playing != null || openDetail != null
+    val requestCurrentFocus: () -> Unit = {
+        val target = when {
+            playing != null -> playerFocus
+            openDetail != null -> detailFocus
+            else -> contentFocus
+        }
+        runCatching { target.requestFocus() }
+    }
+    SideEffect { FocusBridge.requestFocus = requestCurrentFocus }
+    DisposableEffect(Unit) {
+        FocusBridge.hasFocus = false
+        onDispose { FocusBridge.hasFocus = false; FocusBridge.requestFocus = null }
+    }
+    // Mode télécommande (surbrillance visible) demandé une fois au démarrage.
+    LaunchedEffect(Unit) { runCatching { inputModeManager.requestInputMode(InputMode.Keyboard) } }
+    // Dès que rien n'a le focus (démarrage, fin du chargement, fiche/lecteur fermé), on le
+    // replace dans l'écran courant, avec quelques tentatives le temps que la page se compose.
+    val state by vm.state.collectAsStateWithLifecycle()
+    LaunchedEffect(rootHasFocus, overlayOpen, dest, state.loading, state.hasContent) {
+        if (rootHasFocus) return@LaunchedEffect
+        repeat(20) { i ->
+            delay(if (i == 0) 300 else 100)
+            // Une vue native (bande-annonce) qui a le focus le garde.
+            if (FocusBridge.hasFocus || FocusBridge.nativeViewHasFocus()) return@LaunchedEffect
+            requestCurrentFocus()
+            if (FocusBridge.hasFocus) return@LaunchedEffect
+        }
+    }
+    // Changement de page depuis le menu : le focus entre directement dans la page.
+    LaunchedEffect(dest) {
+        delay(150)
+        if (playing == null && openDetail == null) runCatching { contentFocus.requestFocus() }
+    }
 
     Box(
         Modifier
             .fillMaxSize()
             .background(OnyxBg)
-            .onPreviewKeyEvent { ev ->
-                if (ev.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
-                lastKey = ev.key.toString().removePrefix("Key: "); keyCount++
-                val isArrow = ev.key == Key.DirectionUp || ev.key == Key.DirectionDown ||
-                    ev.key == Key.DirectionLeft || ev.key == Key.DirectionRight
-                // Filet de sécurité : une flèche alors que rien n'a le focus → focus dans la page.
-                if (isArrow && !contentHasFocus && playing == null && openDetail == null) {
-                    runCatching { contentFocus.requestFocus() }.isSuccess
-                } else false
+            .onFocusChanged {
+                rootHasFocus = it.hasFocus
+                FocusBridge.hasFocus = it.hasFocus
             }
     ) {
+        // Tant qu'une fiche ou le lecteur est ouvert, le menu et la page en dessous ne doivent
+        // pas recevoir le focus (voir aussi le piège « exit = Cancel » sur chaque superposition).
         Box(Modifier.fillMaxSize().focusProperties { canFocus = !overlayOpen }) {
         NavigationDrawer(
             drawerContent = { drawerValue ->
@@ -181,7 +204,8 @@ fun OnyxRoot(vm: OnyxViewModel = viewModel()) {
                     Modifier
                         .fillMaxHeight()
                         .background(OnyxBg2)
-                        .padding(12.dp),
+                        .padding(12.dp)
+                        .focusProperties { canFocus = !overlayOpen },
                     verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     Row(
@@ -221,12 +245,13 @@ fun OnyxRoot(vm: OnyxViewModel = viewModel()) {
             Box(
                 Modifier
                     .fillMaxSize()
-                    .onFocusChanged { contentHasFocus = it.hasFocus }
                     .focusRequester(contentFocus)
                     // focusRestorer() volontairement absent : bug Compose 1.7 avec les listes
                     // (« Release should only be called once » → plantage).
                     .focusGroup()
             ) {
+                // À l'intérieur du groupe : la propriété s'applique aux éléments de la page.
+                Box(Modifier.fillMaxSize().focusProperties { canFocus = !overlayOpen }) {
                 when (dest) {
                     Dest.HOME -> HomeScreen(vm, onPlay = { playing = it }, onGoLive = { dest = Dest.LIVE }, onGoSettings = { dest = Dest.SETTINGS }, onOpenDetail = { openDetail = it })
                     Dest.LIVE -> LiveTvScreen(vm, onPlay = { playing = it })
@@ -237,6 +262,7 @@ fun OnyxRoot(vm: OnyxViewModel = viewModel()) {
                     Dest.SETTINGS -> SettingsScreen(vm)
                     Dest.SEARCH -> SearchScreen(vm, onPlay = { playing = it }, onOpenDetail = { openDetail = it })
                 }
+                }
             }
         }
 
@@ -245,8 +271,9 @@ fun OnyxRoot(vm: OnyxViewModel = viewModel()) {
         // Cadre de diagnostic (Réglages → Application → Mode diagnostic).
         if (prefs.diagnostics) {
             Text(
-                "DIAG · page ${dest.name} · touche $lastKey (#$keyCount) · focus page ${if (contentHasFocus) "OUI" else "NON"}" +
-                    " · mode ${inputModeManager.inputMode} · lecteur ${if (playing != null) "ouvert" else "fermé"}",
+                "DIAG · page ${dest.name} · touche ${FocusBridge.lastKey.value} · focus ${if (rootHasFocus) "OUI" else "NON"}" +
+                    " · récupérées ${FocusBridge.rescued.intValue} · mode ${inputModeManager.inputMode}" +
+                    " · fiche ${if (openDetail != null) "ouverte" else "fermée"} · lecteur ${if (playing != null) "ouvert" else "fermé"}",
                 style = MaterialTheme.typography.bodyMedium,
                 color = Color.White,
                 modifier = Modifier.align(Alignment.BottomStart).padding(12.dp).background(Color(0xCC000000)).padding(8.dp),
@@ -266,27 +293,80 @@ fun OnyxRoot(vm: OnyxViewModel = viewModel()) {
         }
 
         // Fiche série par-dessus la navigation ; le lecteur reste au-dessus de tout.
+        // Chaque superposition est un groupe de focus « piégé » : les flèches ne peuvent pas en
+        // sortir vers l'écran caché en dessous (exit = Cancel).
         openDetail?.let { item ->
-            if (item.kind == MediaKind.SERIES)
-                SeriesScreen(vm = vm, item = item, onPlay = { playing = it }, onBack = { openDetail = null })
-            else
-                MovieScreen(vm = vm, item = item, onPlay = { playing = it }, onBack = { openDetail = null })
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .focusRequester(detailFocus)
+                    .focusProperties { exit = { FocusRequester.Cancel } }
+                    .focusGroup()
+            ) {
+                Box(Modifier.fillMaxSize().focusProperties { canFocus = playing == null }) {
+                    if (item.kind == MediaKind.SERIES)
+                        SeriesScreen(vm = vm, item = item, onPlay = { playing = it }, onBack = { openDetail = null })
+                    else
+                        MovieScreen(vm = vm, item = item, onPlay = { playing = it }, onBack = { openDetail = null })
+                }
+            }
         }
 
         playing?.let { target ->
-            PlayerScreen(
-                target = target,
-                onExit = { playing = null },
-                onProgress = vm::onPlaybackProgress,
-                zap = { delta -> vm.neighborChannel(target.id, delta)?.toPlayTarget() },
-                onSwitch = { playing = it },
-                zapToNumber = { n -> vm.channelByNumber(n)?.toPlayTarget() },
-                nowPlaying = { t -> vm.nowPlaying(t) },
-                seekBackSeconds = prefs.seekBackSeconds,
-                seekForwardSeconds = prefs.seekForwardSeconds,
-            )
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .focusRequester(playerFocus)
+                    .focusProperties { exit = { FocusRequester.Cancel } }
+                    .focusGroup()
+            ) {
+                PlayerScreen(
+                    target = target,
+                    onExit = { playing = null },
+                    onProgress = vm::onPlaybackProgress,
+                    zap = { delta -> vm.neighborChannel(target.id, delta)?.toPlayTarget() },
+                    onSwitch = { playing = it },
+                    zapToNumber = { n -> vm.channelByNumber(n)?.toPlayTarget() },
+                    nowPlaying = { t -> vm.nowPlaying(t) },
+                    seekBackSeconds = prefs.seekBackSeconds,
+                    seekForwardSeconds = prefs.seekForwardSeconds,
+                )
+            }
         }
     }
+}
+
+/**
+ * Écran plein autonome (PIN, mise à jour) : suit le focus pour le pont Activity et sait le
+ * replacer dans son premier élément si une touche arrive alors que rien n'est sélectionné.
+ */
+@Composable
+private fun FocusRoot(content: @Composable BoxScope.() -> Unit) {
+    val root = remember { FocusRequester() }
+    var hasFocus by remember { mutableStateOf(false) }
+    SideEffect { FocusBridge.requestFocus = { runCatching { root.requestFocus() } } }
+    DisposableEffect(Unit) {
+        FocusBridge.hasFocus = false
+        onDispose { FocusBridge.hasFocus = false }
+    }
+    LaunchedEffect(hasFocus) {
+        if (hasFocus) return@LaunchedEffect
+        repeat(20) { i ->
+            delay(if (i == 0) 300 else 100)
+            if (FocusBridge.hasFocus || FocusBridge.nativeViewHasFocus()) return@LaunchedEffect
+            runCatching { root.requestFocus() }
+            if (FocusBridge.hasFocus) return@LaunchedEffect
+        }
+    }
+    Box(
+        Modifier
+            .fillMaxSize()
+            .background(OnyxBg)
+            .onFocusChanged { hasFocus = it.hasFocus; FocusBridge.hasFocus = it.hasFocus }
+            .focusRequester(root)
+            .focusGroup(),
+        content = content,
+    )
 }
 
 /** Écran plein « Nouvelle version » : le focus est placé sur « Plus tard » pour ne jamais bloquer l'utilisateur. */
