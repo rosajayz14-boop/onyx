@@ -40,7 +40,9 @@ import ca.onyxtv.player.ui.theme.OnyxLive
 import ca.onyxtv.player.ui.theme.OnyxMuted
 import ca.onyxtv.player.ui.theme.OnyxSurface
 import ca.onyxtv.player.ui.theme.OnyxViolet
+import androidx.compose.ui.platform.LocalContext
 import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import kotlin.math.abs
 
 // ---- Conversions vers une cible de lecture ----
@@ -93,8 +95,9 @@ fun Thumbnail(
 ) {
     Box(modifier.background(brushFor(seed))) {
         if (!imageUrl.isNullOrBlank()) {
+            // Décodage en taille réduite : évite les bitmaps géants (logos 2000 px) qui font planter les box.
             AsyncImage(
-                model = imageUrl,
+                model = ImageRequest.Builder(LocalContext.current).data(imageUrl).size(360).build(),
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize(),

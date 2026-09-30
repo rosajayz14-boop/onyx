@@ -23,6 +23,20 @@ object Http {
 
     private const val UA = "ONYX-TV/1.0 (Android TV)"
 
+    /** Dossier temporaire pour les grosses réponses (défini au démarrage de l'app). */
+    @Volatile var tempDir: java.io.File? = null
+
+    /** Télécharge en flux vers [file] (mémoire constante, quelle que soit la taille). */
+    suspend fun getToFile(url: String, file: java.io.File): java.io.File = withContext(Dispatchers.IO) {
+        val request = Request.Builder().url(url).header("User-Agent", UA).build()
+        client.newCall(request).execute().use { resp ->
+            if (!resp.isSuccessful) throw IOException("HTTP ${resp.code}")
+            val body = resp.body ?: throw IOException("Réponse vide")
+            body.byteStream().use { input -> file.outputStream().buffered().use { out -> input.copyTo(out, 64 * 1024) } }
+        }
+        file
+    }
+
     suspend fun get(url: String): String = withContext(Dispatchers.IO) {
         val request = Request.Builder().url(url).header("User-Agent", UA).build()
         client.newCall(request).execute().use { resp ->

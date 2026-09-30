@@ -16,7 +16,10 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.json.decodeFromJsonElement
+import kotlinx.serialization.json.decodeFromStream
+import java.io.File
 import java.net.URLEncoder
 
 /**
@@ -260,10 +263,32 @@ class XtreamClient(
      * type inattendu, panneau exotique) est ignoré au lieu de faire disparaître tout le
      * catalogue. Une réponse qui n'est pas un tableau (ex. erreur d'auth en objet) lève.
      */
+    @OptIn(ExperimentalSerializationApi::class)
     private suspend inline fun <reified T> getList(url: String): List<T> {
-        val body = Http.get(url)
-        val root = runCatching { json.parseToJsonElement(body) }
-            .getOrElse { throw IllegalStateException("réponse illisible du serveur") }
+        val dir = Http.tempDir
+        if (dir == null) {
+            // Pas de dossier temporaire (tests) : chemin mémoire.
+            val body = Http.get(url)
+            return tolerantList(runCatching { json.parseToJsonElement(body) }.getOrElse { throw IllegalStateException("réponse illisible du serveur") })
+        }
+        dir.mkdirs()
+        val file = File(dir, "xt-${url.hashCode()}-${System.nanoTime()}.json")
+        try {
+            Http.getToFile(url, file)
+            // 1) Chemin rapide et économe : décodage en flux depuis le fichier, sans arbre JSON
+            //    ni gros String en mémoire — c'est ce qui compte avec 50 000 titres sur une box TV.
+            val strict = runCatching { file.inputStream().buffered().use { json.decodeFromStream<List<T>>(it) } }
+            strict.getOrNull()?.let { return it }
+            // 2) Repli tolérant (rare) : élément par élément, un enregistrement mal formé est ignoré.
+            val root = runCatching { file.inputStream().buffered().use { json.decodeFromStream<JsonElement>(it) } }
+                .getOrElse { throw IllegalStateException("réponse illisible du serveur") }
+            return tolerantList(root)
+        } finally {
+            file.delete()
+        }
+    }
+
+    private inline fun <reified T> tolerantList(root: JsonElement): List<T> {
         val array = root as? JsonArray
             ?: throw IllegalStateException(
                 if (root is JsonObject && root.containsKey("user_info")) "identifiants refusés" else "réponse inattendue du serveur"

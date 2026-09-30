@@ -29,6 +29,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.painterResource
@@ -91,6 +92,22 @@ fun OnyxRoot(vm: OnyxViewModel = viewModel()) {
                 onSubmit = { vm.unlockApp(it) },
             )
         }
+        return
+    }
+
+    // Mise à jour disponible : écran dédié (jamais par-dessus le contenu → le focus reste maîtrisé).
+    val update by vm.update.collectAsStateWithLifecycle()
+    var dismissedUpdate by remember { mutableStateOf<String?>(null) }
+    val pendingUpdate = update.info?.takeIf { it.commit != dismissedUpdate }
+    if (pendingUpdate != null && playing == null && openDetail == null) {
+        UpdateScreen(
+            label = pendingUpdate.label,
+            downloading = update.downloading,
+            ready = update.readyFile != null,
+            error = update.error,
+            onInstall = { if (update.readyFile != null) vm.installUpdate() else vm.downloadAndInstallUpdate() },
+            onLater = { dismissedUpdate = pendingUpdate.commit },
+        )
         return
     }
 
@@ -167,32 +184,6 @@ fun OnyxRoot(vm: OnyxViewModel = viewModel()) {
             }
         }
 
-        // Mise à jour de l'application disponible : proposition à l'ouverture (une fois par version).
-        val update by vm.update.collectAsStateWithLifecycle()
-        var dismissedUpdate by remember { mutableStateOf<String?>(null) }
-        val pending = update.info?.takeIf { it.commit != dismissedUpdate }
-        if (pending != null && playing == null && openDetail == null) {
-            Box(Modifier.fillMaxSize().background(Color(0xCC050509)), contentAlignment = Alignment.Center) {
-                Column(
-                    Modifier.width(560.dp).background(OnyxBg2).padding(28.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    Text("✨ Nouvelle version d'ONYX TV", style = MaterialTheme.typography.headlineMedium)
-                    Text(pending.label, color = OnyxMuted)
-                    update.downloading?.let { p -> Text("Téléchargement… ${(p * 100).toInt()} %", color = MaterialTheme.colorScheme.secondary) }
-                    update.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        when {
-                            update.readyFile != null -> androidx.tv.material3.Button(onClick = { vm.installUpdate() }) { Text("📦 Installer") }
-                            update.downloading == null -> androidx.tv.material3.Button(onClick = { vm.downloadAndInstallUpdate() }) { Text("⬇ Installer maintenant") }
-                        }
-                        androidx.tv.material3.Button(onClick = { dismissedUpdate = pending.commit }) { Text("Plus tard") }
-                    }
-                    Text("L'installation se fait sans quitter l'app. Vos comptes, favoris et réglages sont conservés.", color = OnyxMuted, style = MaterialTheme.typography.bodyMedium)
-                }
-            }
-        }
-
         // Horloge discrète (mise à jour chaque 30 s), masquée pendant la lecture.
         if (playing == null) {
             var now by remember { mutableStateOf(System.currentTimeMillis()) }
@@ -224,6 +215,46 @@ fun OnyxRoot(vm: OnyxViewModel = viewModel()) {
                 nowPlaying = { t -> vm.nowPlaying(t) },
                 seekBackSeconds = prefs.seekBackSeconds,
                 seekForwardSeconds = prefs.seekForwardSeconds,
+            )
+        }
+    }
+}
+
+/** Écran plein « Nouvelle version » : le focus est placé sur « Plus tard » pour ne jamais bloquer l'utilisateur. */
+@Composable
+private fun UpdateScreen(
+    label: String,
+    downloading: Float?,
+    ready: Boolean,
+    error: String?,
+    onInstall: () -> Unit,
+    onLater: () -> Unit,
+) {
+    val laterFocus = remember { androidx.compose.ui.focus.FocusRequester() }
+    LaunchedEffect(Unit) { runCatching { laterFocus.requestFocus() } }
+    androidx.activity.compose.BackHandler(enabled = true) { onLater() }
+    Box(Modifier.fillMaxSize().background(OnyxBg), contentAlignment = Alignment.Center) {
+        Column(
+            Modifier.width(600.dp).background(OnyxBg2).padding(32.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text("✨ Nouvelle version d'ONYX TV", style = MaterialTheme.typography.headlineMedium)
+            Text(label, color = OnyxMuted)
+            downloading?.let { p -> Text("Téléchargement… ${(p * 100).toInt()} %", color = MaterialTheme.colorScheme.secondary) }
+            error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                androidx.tv.material3.Button(
+                    onClick = onLater,
+                    modifier = Modifier.focusRequester(laterFocus),
+                ) { Text("Plus tard") }
+                if (downloading == null) {
+                    androidx.tv.material3.Button(onClick = onInstall) { Text(if (ready) "📦 Installer" else "⬇ Installer maintenant") }
+                }
+            }
+            Text(
+                "L'installation se fait sans quitter l'app ; comptes, favoris et réglages sont conservés. " +
+                    "Retour = plus tard.",
+                color = OnyxMuted, style = MaterialTheme.typography.bodyMedium,
             )
         }
     }

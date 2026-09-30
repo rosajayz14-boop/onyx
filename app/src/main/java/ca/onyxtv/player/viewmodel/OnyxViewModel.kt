@@ -23,7 +23,14 @@ import ca.onyxtv.player.dvr.RecordingInfo
 import ca.onyxtv.player.dvr.RecordingService
 import ca.onyxtv.player.dvr.RecordingStore
 import ca.onyxtv.player.player.PlayTarget
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -92,6 +99,42 @@ class OnyxViewModel(app: Application) : AndroidViewModel(app) {
         userStore.favorites.stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
     val recents: StateFlow<List<RecentItem>> =
         userStore.recents.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    /**
+     * Recommandations calculées EN ARRIÈRE-PLAN, uniquement quand le catalogue, les favoris ou
+     * l'ensemble des contenus vus changent (pas à chaque sauvegarde de position toutes les 5 s).
+     */
+    val recommended: StateFlow<List<VodItem>> = combine(
+        _state.map { it.vod }.distinctUntilChanged(),
+        favorites,
+        recents.map { list -> list.map { it.id }.toSet() }.distinctUntilChanged(),
+    ) { vod, favs, seen -> recommendVod(vod, favs, seen) }
+        .flowOn(Dispatchers.Default)
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    // ---- Recherche (anti-rebond + arrière-plan) ----
+    private val _searchQuery = MutableStateFlow("")
+    val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
+    fun setSearchQuery(q: String) { _searchQuery.value = q }
+
+    @OptIn(FlowPreview::class)
+    val searchResults: StateFlow<Pair<List<Channel>, List<VodItem>>> = combine(
+        _searchQuery.debounce(250),
+        _state.map { it.channels to it.vod }.distinctUntilChanged(),
+    ) { q, (channels, vod) ->
+        val needle = q.trim()
+        if (needle.length < 2) emptyList<Channel>() to emptyList()
+        else channels.asSequence().filter { it.name.contains(needle, ignoreCase = true) }.take(60).toList() to
+            vod.asSequence().filter { it.name.contains(needle, ignoreCase = true) }.take(60).toList()
+    }.flowOn(Dispatchers.Default)
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList<Channel>() to emptyList())
+
+    // ---- Journal de plantage ----
+    private val crashFile = File(app.filesDir, ca.onyxtv.player.OnyxApp.CRASH_FILE)
+    var lastCrash: String? = runCatching { crashFile.takeIf { it.exists() }?.readText() }.getOrNull()
+        private set
+
+    fun clearCrash() { runCatching { crashFile.delete() }; lastCrash = null }
 
     // ---- Préférences ----
     val prefs: StateFlow<AppPrefs> =
@@ -429,8 +472,7 @@ fun hiddenGroups(parental: ParentalSettings, unlocked: Set<String>): Set<String>
  * Recommandations : heuristique locale basée sur les catégories des favoris et des récents.
  * Sans historique, on privilégie les mieux notés. Les contenus déjà vus sont écartés.
  */
-fun recommendVod(vod: List<VodItem>, favorites: Set<String>, recents: List<RecentItem>, limit: Int = 24): List<VodItem> {
-    val seen = recents.map { it.id }.toSet()
+fun recommendVod(vod: List<VodItem>, favorites: Set<String>, seen: Set<String>, limit: Int = 24): List<VodItem> {
     fun rating(v: VodItem) = v.rating?.toFloatOrNull() ?: 0f
     val likedCats = vod.filter { it.id in favorites || it.id in seen }
         .mapNotNull { it.category }

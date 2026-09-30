@@ -41,7 +41,6 @@ import ca.onyxtv.player.ui.theme.OnyxCyan
 import ca.onyxtv.player.ui.theme.OnyxMuted
 import ca.onyxtv.player.viewmodel.OnyxViewModel
 import ca.onyxtv.player.viewmodel.hiddenGroups
-import ca.onyxtv.player.viewmodel.recommendVod
 import coil.compose.AsyncImage
 
 @Composable
@@ -93,7 +92,8 @@ fun HomeScreen(
     val resumable = remember(recents) { recents.filter { it.resumable } }
     val favChannels = remember(channels, favorites) { channels.filter { it.id in favorites } }
     val favVod = remember(vod, favorites) { vod.filter { it.id in favorites } }
-    val recommended = remember(vod, favorites, recents) { recommendVod(vod, favorites, recents) }
+    val recommendedAll by vm.recommended.collectAsStateWithLifecycle()
+    val recommended = remember(recommendedAll, hidden) { recommendedAll.filterNot { it.category in hidden } }
 
     // Mise en avant : reprise en cours > film recommandé > première chaîne.
     val heroResume = resumable.firstOrNull()

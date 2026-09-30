@@ -15,7 +15,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.material3.MaterialTheme as Md3
 import androidx.compose.material3.OutlinedTextField
@@ -196,7 +195,6 @@ private fun Field(
     label: String,
     value: String,
     keyboard: KeyboardType = KeyboardType.Text,
-    onFocus: (() -> Unit)? = null,
     onValue: (String) -> Unit,
 ) {
     OutlinedTextField(
@@ -208,28 +206,8 @@ private fun Field(
         keyboardOptions = KeyboardOptions(keyboardType = keyboard, autoCorrect = false),
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 6.dp)
-            .onFocusChanged { if (it.isFocused) onFocus?.invoke() },
+            .padding(vertical = 6.dp),
     )
-}
-
-/**
- * Touches rapides (chiffres et symboles d'adresses) qui écrivent dans le dernier champ
- * sélectionné — indépendant du clavier de la box (certains n'ont pas de rangée de chiffres).
- */
-@Composable
-private fun QuickKeys(target: String?, onKey: (String) -> Unit, onBackspace: () -> Unit) {
-    Text(
-        if (target == null) "Touches rapides : sélectionnez d'abord un champ." else "Touches rapides → $target",
-        color = OnyxMuted, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 8.dp),
-    )
-    Row(horizontalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.padding(top = 4.dp)) {
-        "1234567890".forEach { c -> Button(onClick = { onKey(c.toString()) }) { Text(c.toString()) } }
-    }
-    Row(horizontalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.padding(top = 4.dp)) {
-        listOf(".", ":", "/", "@", "-", "_").forEach { k -> Button(onClick = { onKey(k) }) { Text(k) } }
-        Button(onClick = onBackspace) { Text("⌫") }
-    }
 }
 
 @Composable
@@ -237,17 +215,11 @@ private fun AddM3uCard(vm: OnyxViewModel) {
     var label by remember { mutableStateOf("") }
     var url by remember { mutableStateOf("") }
     var epg by remember { mutableStateOf("") }
-    var active by remember { mutableStateOf<String?>(null) }
 
     FormCard("Ajouter une liste M3U") {
-        Field("Nom", label, onFocus = { active = "Nom" }) { label = it }
-        Field("URL .m3u / .m3u8", url, KeyboardType.Uri, onFocus = { active = "URL" }) { url = it }
-        Field("URL EPG XMLTV (optionnel)", epg, KeyboardType.Uri, onFocus = { active = "EPG" }) { epg = it }
-        QuickKeys(
-            target = active,
-            onKey = { k -> when (active) { "Nom" -> label += k; "URL" -> url += k; "EPG" -> epg += k } },
-            onBackspace = { when (active) { "Nom" -> label = label.dropLast(1); "URL" -> url = url.dropLast(1); "EPG" -> epg = epg.dropLast(1) } },
-        )
+        Field("Nom", label) { label = it }
+        Field("URL .m3u / .m3u8", url, KeyboardType.Uri) { url = it }
+        Field("URL EPG XMLTV (optionnel)", epg, KeyboardType.Uri) { epg = it }
         Spacer(Modifier.height(8.dp))
         Button(onClick = {
             if (url.isNotBlank()) {
@@ -263,7 +235,6 @@ private fun AddXtreamCard(vm: OnyxViewModel) {
     var label by remember { mutableStateOf("") }
     var user by remember { mutableStateOf("") }
     var pass by remember { mutableStateOf("") }
-    var active by remember { mutableStateOf<String?>(null) }
     // Serveur figé (BuildConfig.DEFAULT_SERVER) : seul le compte est demandé.
     val server = ca.onyxtv.player.BuildConfig.DEFAULT_SERVER
 
@@ -272,20 +243,9 @@ private fun AddXtreamCard(vm: OnyxViewModel) {
             "Serveur : ${server.removePrefix("http://").removePrefix("https://")}  ·  entrez simplement votre identifiant et votre mot de passe.",
             color = OnyxMuted, style = MaterialTheme.typography.bodyMedium,
         )
-        Field("Nom (optionnel)", label, onFocus = { active = "Nom" }) { label = it }
-        Field("Nom d'utilisateur", user, KeyboardType.Ascii, onFocus = { active = "Utilisateur" }) { user = it }
-        Field("Mot de passe", pass, KeyboardType.Ascii, onFocus = { active = "Mot de passe" }) { pass = it }
-        QuickKeys(
-            target = active,
-            onKey = { k ->
-                when (active) { "Nom" -> label += k; "Utilisateur" -> user += k; "Mot de passe" -> pass += k }
-            },
-            onBackspace = {
-                when (active) {
-                    "Nom" -> label = label.dropLast(1); "Utilisateur" -> user = user.dropLast(1); "Mot de passe" -> pass = pass.dropLast(1)
-                }
-            },
-        )
+        Field("Nom (optionnel)", label) { label = it }
+        Field("Nom d'utilisateur", user, KeyboardType.Ascii) { user = it }
+        Field("Mot de passe", pass, KeyboardType.Ascii) { pass = it }
         Spacer(Modifier.height(8.dp))
         Button(onClick = {
             if (user.isNotBlank() && pass.isNotBlank()) {
@@ -435,6 +395,11 @@ private fun AppCard(vm: OnyxViewModel) {
             Button(onClick = { vm.checkForUpdate(force = true) }) {
                 Text(if (update.checking) "Vérification…" else "Vérifier les mises à jour")
             }
+        }
+        vm.lastCrash?.let { crash ->
+            Text("⚠ Dernier plantage enregistré :", color = OnyxLive, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 12.dp))
+            Text(crash.lines().take(8).joinToString("\n"), color = OnyxMuted, style = MaterialTheme.typography.bodyMedium, maxLines = 8, overflow = TextOverflow.Ellipsis)
+            Button(onClick = { vm.clearCrash() }, modifier = Modifier.padding(top = 6.dp)) { Text("Effacer le journal") }
         }
         if (update.info != null) {
             Text(

@@ -88,6 +88,10 @@ fun LiveTvScreen(vm: OnyxViewModel, onPlay: (PlayTarget) -> Unit) {
     }
 
     val groups = remember(channels) { channels.mapNotNull { it.groupTitle }.distinct() }
+    // Comptages calculés UNE fois (et non catégories × chaînes à chaque affichage).
+    val countByGroup = remember(channels) { channels.groupingBy { it.groupTitle }.eachCount() }
+    val visibleCount = remember(channels, hidden) { channels.count { it.groupTitle !in hidden } }
+    val favCount = remember(channels, favorites, hidden) { channels.count { it.id in favorites && it.groupTitle !in hidden } }
     var group by remember { mutableStateOf(GROUP_ALL) }
     var pendingLocked by remember { mutableStateOf<String?>(null) }
     val filtered = remember(channels, group, favorites, hidden) {
@@ -110,15 +114,13 @@ fun LiveTvScreen(vm: OnyxViewModel, onPlay: (PlayTarget) -> Unit) {
                 item {
                     Text("Catégories", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(bottom = 8.dp))
                 }
-                item { GroupItem("Toutes", channels.count { it.groupTitle !in hidden }, group == GROUP_ALL) { group = GROUP_ALL } }
-                item {
-                    GroupItem("★ Favoris", channels.count { it.id in favorites && it.groupTitle !in hidden }, group == GROUP_FAV) { group = GROUP_FAV }
-                }
+                item { GroupItem("Toutes", visibleCount, group == GROUP_ALL) { group = GROUP_ALL } }
+                item { GroupItem("★ Favoris", favCount, group == GROUP_FAV) { group = GROUP_FAV } }
                 items(groups, key = { it }) { g ->
                     val locked = parental.enabled && g in parental.lockedGroups
                     GroupItem(
                         name = if (locked) "🔒 $g" else g,
-                        count = channels.count { it.groupTitle == g },
+                        count = countByGroup[g] ?: 0,
                         selected = group == g,
                     ) { selectGroup(g) }
                 }
