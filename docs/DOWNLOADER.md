@@ -73,6 +73,38 @@ Il transforme la longue URL en un **code à 6 chiffres** facile à saisir et à 
 5. Sur la TV, dans **Downloader**, tapez **seulement le code** (`123456`) dans le champ URL → **GO**.
    Downloader résout le code, télécharge l'APK et propose **Installer**.
 
+### Vérifier que le code fonctionne AVANT de toucher à la TV
+
+Ouvrez dans le navigateur d'un PC/téléphone : `https://aftv.news/VOTRECODE`
+(ex. `https://aftv.news/123456`). Le navigateur doit **rediriger et lancer le
+téléchargement de `onyx-tv.apk`**. Si oui, le code marchera dans Downloader. Sinon,
+voir la checklist ci-dessous.
+
+### Pourquoi un code « ne marche pas » — checklist
+
+Comment Downloader résout un code : quand vous tapez un nombre seul, il va chercher
+`https://aftv.news/<nombre>` qui **redirige** vers l'URL longue que vous avez enregistrée.
+Donc si le code échoue, c'est presque toujours l'un de ces points :
+
+1. **Vous avez tapé autre chose que les chiffres.** Dans Downloader, saisissez UNIQUEMENT
+   le nombre (`123456`) — pas `http://`, pas `aftv.news/…`, pas d'espace.
+2. **Le code pointe vers la mauvaise URL.** Il doit contenir le lien du **fichier .apk**
+   (`…/releases/download/tv-latest/onyx-tv.apk`), **pas** la page « Releases ». Recréez le
+   code en recollant exactement cette URL.
+3. **Faute de frappe à la création.** Copiez-collez l'URL, ne la tapez pas à la main.
+4. **Le dépôt GitHub est passé en privé.** Un lien privé renvoie 404 pour Downloader :
+   le dépôt doit rester **public**.
+5. **Sources inconnues non autorisées** (Étape 1) : le téléchargement marche mais
+   l'installation est refusée. Ce n'est pas un problème de code.
+6. **aftv.news momentanément indisponible / code très récent** : réessayez après 1–2 min.
+
+### Alternative sans aftv.news (raccourci « maison »)
+
+Downloader suit les redirections HTTP. N'importe quel raccourcisseur qui fait une
+redirection 301/302 vers l'URL de l'APK fonctionne donc aussi (ex. **is.gd**, **tinyurl**).
+Vous tapez alors l'URL courte complète (ex. `is.gd/onyxtv`) dans Downloader. Seul le
+**code purement numérique** est spécifique à aftv.news.
+
 **Bon à savoir**
 - Comme l'URL `tv-latest` pointe toujours vers la dernière version, **le même code
   ressert pour toutes les futures mises à jour** : inutile d'en recréer un.
