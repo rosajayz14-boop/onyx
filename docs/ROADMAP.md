@@ -25,6 +25,11 @@ Ce fichier distingue ce qui est **livré** de ce qui reste **à faire**.
 - **Recommandations** : heuristique locale (catégories aimées, notes, contenus déjà vus écartés).
 
 ### Fonctions avancées
+- **Fiche film** (get_vod_info) : bande-annonce YouTube, synopsis, note ★, acteurs, réalisateur, genre, durée.
+- **Mises à jour automatiques** : catalogue chaque jour en arrière-plan (WorkManager) ; vérification
+  quotidienne d'une nouvelle version de l'app, téléchargement et installation depuis l'app.
+- **Reprise à la sortie** : position sauvegardée quand on quitte (Accueil/veille), option de reprise
+  automatique à l'ouverture.
 - **Mosaïque** : 4 chaînes lues **simultanément** (un ExoPlayer par tuile), son sur la tuile
   focalisée, OK = plein écran, repli visuel si un flux échoue.
 - **DVR** : service de premier plan capturant le flux vers le stockage privé de l'app,

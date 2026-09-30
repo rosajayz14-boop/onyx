@@ -41,7 +41,7 @@ import ca.onyxtv.player.viewmodel.hiddenGroups
 fun VodScreen(
     vm: OnyxViewModel,
     onPlay: (PlayTarget) -> Unit,
-    onOpenSeries: (VodItem) -> Unit,
+    onOpenDetail: (VodItem) -> Unit,
 ) {
     val state by vm.state.collectAsStateWithLifecycle()
     val favorites by vm.favorites.collectAsStateWithLifecycle()
@@ -126,7 +126,7 @@ fun VodScreen(
                         v.kind == MediaKind.SERIES -> "SÉRIE"
                         else -> null
                     },
-                    onClick = { if (v.kind == MediaKind.SERIES) onOpenSeries(v) else onPlay(v.toPlayTarget()) },
+                    onClick = { onOpenDetail(v) },
                 )
             }
         }

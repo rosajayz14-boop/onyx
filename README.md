@@ -19,16 +19,17 @@ multi-vue, VOD) mais tout le code, le design et la marque sont à vous.
 | Chaînes en direct | ✅ | M3U/M3U8 + Xtream Codes, **catégories** (noms), compteurs, ★ favoris |
 | Guide EPG | ✅ | now/next + **grille TV plein écran** style Helix / TiviMate (ligne « maintenant », fiche programme, OK = regarder / revoir / enregistrer) |
 | **Rattrapage (catch-up)** | ✅ | « ↺ Revoir » sur les programmes passés des chaînes archivées (timeshift Xtream) |
-| Films | ✅ | Catalogue Xtream, filtre par catégorie, reprise, favoris |
+| Films | ✅ | Catalogue Xtream, catégories, **fiche film** (bande-annonce, synopsis, note en étoiles, acteurs, réalisateur), reprise, favoris |
 | **Séries** | ✅ | Saisons / épisodes (`get_series_info`), fiche, « Reprendre SxEy » |
 | Lecteur plein écran | ✅ | Media3/ExoPlayer — HLS, DASH, TS, MP4 ; erreurs + Réessayer, chargement, **zapping ↑↓ / CH± / numéro**, **menu ≡ : pistes audio, sous-titres, format d'image**, programme en cours |
-| **Favoris / Récents / Reprise** | ✅ | Rangées « Reprendre » (barre de progression) et « Mes favoris » sur l'accueil |
+| **Favoris / Récents / Reprise** | ✅ | Position mémorisée à la sortie de l'app, option « Reprendre la dernière lecture à l'ouverture », rangées « Reprendre » et « Mes favoris » |
 | Recherche | ✅ | Chaînes + films + séries |
 | Mosaïque multi-écran | ✅ | **4 chaînes lues simultanément** (2×2), son sur la tuile focalisée, OK = plein écran |
 | Enregistrements / DVR | ✅ | Service de premier plan → fichiers locaux ; lire / arrêter / supprimer |
 | Réglages | ✅ | Sources M3U / Xtream avec **test de connexion**, format des flux **TS/HLS**, **Tout mettre à jour**, **MAJ du guide**, bilan par source, cache disque |
 | **Contrôle parental** | ✅ | PIN 4 chiffres, catégories verrouillées, verrouillage au démarrage |
 | Recommandations | ✅ | Heuristique locale (catégories des favoris / récents, notes) |
+| **Mises à jour automatiques** | ✅ | Catalogue actualisé **chaque jour en arrière-plan** ; nouvelle version de l'app détectée **1×/jour**, téléchargée et installée depuis l'app |
 | Navigation télécommande | ✅ | Rail latéral déployable (façon Google TV) |
 
 Distribution : voir `docs/DISTRIBUTION.md` (APK auto-compilé, URL fixe) et `docs/DOWNLOADER.md`

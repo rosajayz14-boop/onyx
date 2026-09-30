@@ -45,6 +45,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
@@ -206,6 +209,30 @@ fun PlayerScreen(
             exo.removeListener(listener)
             exo.release()
         }
+    }
+
+    // Quitter l'app (Accueil, veille) : position sauvegardée et lecture mise en pause ;
+    // retour dans l'app : reprise (retour au direct pour une chaîne).
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, exo) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_STOP -> {
+                    runCatching {
+                        val dur = exo.duration
+                        currentOnProgress(currentTarget, exo.currentPosition, if (dur == C.TIME_UNSET) 0L else dur)
+                    }
+                    exo.pause()
+                }
+                Lifecycle.Event.ON_START -> {
+                    if (currentTarget.isLive) exo.seekToDefaultPosition()
+                    exo.play()
+                }
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
     // (Re)chargement à chaque changement de cible, avec bandeau d'info temporaire.

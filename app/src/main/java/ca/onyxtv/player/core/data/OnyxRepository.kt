@@ -4,6 +4,7 @@ import ca.onyxtv.player.core.epg.XmltvParser
 import ca.onyxtv.player.core.m3u.M3uParser
 import ca.onyxtv.player.core.model.Channel
 import ca.onyxtv.player.core.model.EpgProgram
+import ca.onyxtv.player.core.model.MovieDetail
 import ca.onyxtv.player.core.model.PlaylistSource
 import ca.onyxtv.player.core.model.SeriesDetail
 import ca.onyxtv.player.core.model.VodItem
@@ -154,6 +155,16 @@ class OnyxRepository(
             .firstOrNull { it.id == sourceId } ?: return null
         val minutes = (program.durationMs / 60_000L).toInt().coerceAtLeast(1)
         return xt.timeshiftUrl(src, streamId, program.start, minutes)
+    }
+
+    /** Fiche d'un film. Null si la source n'existe plus. id = "xt:<sourceId>:vod:<streamId>" */
+    suspend fun movieDetail(item: VodItem): MovieDetail? {
+        val parts = item.id.split(":")
+        val sourceId = parts.getOrNull(1) ?: return null
+        val streamId = parts.getOrNull(3) ?: return null
+        val src = store.sources.first().filterIsInstance<PlaylistSource.Xtream>()
+            .firstOrNull { it.id == sourceId } ?: return null
+        return xt.movieInfo(src, streamId)
     }
 
     /** Fiche complète d'une série (saisons/épisodes). Null si la source n'existe plus. */

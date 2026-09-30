@@ -46,7 +46,7 @@ private data class SearchHit(
 fun SearchScreen(
     vm: OnyxViewModel,
     onPlay: (PlayTarget) -> Unit,
-    onOpenSeries: (VodItem) -> Unit,
+    onOpenDetail: (VodItem) -> Unit,
 ) {
     val state by vm.state.collectAsStateWithLifecycle()
     val parental by vm.parental.collectAsStateWithLifecycle()
@@ -66,9 +66,9 @@ fun SearchScreen(
                 add(
                     SearchHit(
                         it.name, it.category ?: it.year, it.posterUrl, it.id, it.name.take(1).uppercase(), 2f / 3f,
-                        if (isSeries) "SÉRIE" else null,
-                        if (isSeries) null else it.toPlayTarget(),
-                        if (isSeries) it else null,
+                        if (isSeries) "SÉRIE" else "FILM",
+                        null,
+                        it,
                     )
                 )
             }
@@ -116,7 +116,7 @@ fun SearchScreen(
                         initials = hit.initials,
                         badge = hit.badge,
                         onClick = {
-                            hit.series?.let(onOpenSeries) ?: hit.target?.let(onPlay)
+                            hit.series?.let(onOpenDetail) ?: hit.target?.let(onPlay)
                         },
                     )
                 }

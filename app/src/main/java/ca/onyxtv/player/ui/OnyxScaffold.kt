@@ -51,7 +51,9 @@ import ca.onyxtv.player.ui.guide.GuideScreen
 import ca.onyxtv.player.ui.home.HomeScreen
 import ca.onyxtv.player.ui.live.LiveTvScreen
 import ca.onyxtv.player.ui.mosaic.MosaicScreen
+import ca.onyxtv.player.core.model.MediaKind
 import ca.onyxtv.player.core.model.VodItem
+import ca.onyxtv.player.ui.movie.MovieScreen
 import ca.onyxtv.player.ui.search.SearchScreen
 import ca.onyxtv.player.ui.series.SeriesScreen
 import ca.onyxtv.player.ui.settings.SettingsScreen
@@ -76,7 +78,7 @@ enum class Dest(val label: String, val icon: ImageVector) {
 fun OnyxRoot(vm: OnyxViewModel = viewModel()) {
     var dest by remember { mutableStateOf(Dest.HOME) }
     var playing by remember { mutableStateOf<PlayTarget?>(null) }
-    var openSeries by remember { mutableStateOf<VodItem?>(null) }
+    var openDetail by remember { mutableStateOf<VodItem?>(null) }
 
     // Verrouillage de l'application au démarrage (contrôle parental).
     val parental by vm.parental.collectAsStateWithLifecycle()
@@ -90,6 +92,17 @@ fun OnyxRoot(vm: OnyxViewModel = viewModel()) {
             )
         }
         return
+    }
+
+    // Reprise automatique de la dernière lecture à l'ouverture (option Réglages → Lecture).
+    val prefs by vm.prefs.collectAsStateWithLifecycle()
+    val recents by vm.recents.collectAsStateWithLifecycle()
+    var autoResumed by remember { mutableStateOf(false) }
+    LaunchedEffect(prefs.resumeOnStart, recents) {
+        if (!autoResumed && prefs.resumeOnStart && recents.isNotEmpty()) {
+            autoResumed = true
+            playing = recents.first().toPlayTarget()
+        }
     }
 
     Box(
@@ -142,14 +155,14 @@ fun OnyxRoot(vm: OnyxViewModel = viewModel()) {
         ) {
             Box(Modifier.fillMaxSize()) {
                 when (dest) {
-                    Dest.HOME -> HomeScreen(vm, onPlay = { playing = it }, onGoLive = { dest = Dest.LIVE }, onGoSettings = { dest = Dest.SETTINGS }, onOpenSeries = { openSeries = it })
+                    Dest.HOME -> HomeScreen(vm, onPlay = { playing = it }, onGoLive = { dest = Dest.LIVE }, onGoSettings = { dest = Dest.SETTINGS }, onOpenDetail = { openDetail = it })
                     Dest.LIVE -> LiveTvScreen(vm, onPlay = { playing = it })
                     Dest.GUIDE -> GuideScreen(vm, onPlay = { playing = it })
-                    Dest.VOD -> VodScreen(vm, onPlay = { playing = it }, onOpenSeries = { openSeries = it })
+                    Dest.VOD -> VodScreen(vm, onPlay = { playing = it }, onOpenDetail = { openDetail = it })
                     Dest.MOSAIC -> MosaicScreen(vm, onPlay = { playing = it })
                     Dest.DVR -> DvrScreen(vm, onPlay = { playing = it })
                     Dest.SETTINGS -> SettingsScreen(vm)
-                    Dest.SEARCH -> SearchScreen(vm, onPlay = { playing = it }, onOpenSeries = { openSeries = it })
+                    Dest.SEARCH -> SearchScreen(vm, onPlay = { playing = it }, onOpenDetail = { openDetail = it })
                 }
             }
         }
@@ -167,8 +180,11 @@ fun OnyxRoot(vm: OnyxViewModel = viewModel()) {
         }
 
         // Fiche série par-dessus la navigation ; le lecteur reste au-dessus de tout.
-        openSeries?.let { item ->
-            SeriesScreen(vm = vm, item = item, onPlay = { playing = it }, onBack = { openSeries = null })
+        openDetail?.let { item ->
+            if (item.kind == MediaKind.SERIES)
+                SeriesScreen(vm = vm, item = item, onPlay = { playing = it }, onBack = { openDetail = null })
+            else
+                MovieScreen(vm = vm, item = item, onPlay = { playing = it }, onBack = { openDetail = null })
         }
 
         playing?.let { target ->

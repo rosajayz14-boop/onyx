@@ -55,6 +55,24 @@ data class Episode(
     val durationSecs: Int? = null,
 )
 
+/** Fiche détaillée d'un film (get_vod_info). */
+data class MovieDetail(
+    val plot: String? = null,
+    val cast: String? = null,
+    val director: String? = null,
+    val genre: String? = null,
+    val releaseDate: String? = null,
+    /** Note sur 10 (null si inconnue). */
+    val rating: Float? = null,
+    val duration: String? = null,
+    /** Lien de bande-annonce (YouTube), null si absent. */
+    val trailerUrl: String? = null,
+    val backdropUrl: String? = null,
+) {
+    /** Note sur 5 étoiles, arrondie au demi. */
+    val stars: Float? get() = rating?.let { (it / 2f * 2).toInt() / 2f }
+}
+
 /** Fiche détaillée d'une série : saisons → épisodes. */
 data class SeriesDetail(
     val name: String,

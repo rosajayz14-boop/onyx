@@ -46,9 +46,18 @@ data class ParentalSettings(
     val enabled: Boolean get() = !pin.isNullOrBlank()
 }
 
+/** Préférences générales de l'application. */
+@Serializable
+data class AppPrefs(
+    /** Relance automatiquement la dernière lecture à l'ouverture de l'app. */
+    val resumeOnStart: Boolean = false,
+    /** Dernière vérification de mise à jour de l'application (epoch ms). */
+    val lastUpdateCheck: Long = 0,
+)
+
 /**
- * Données utilisateur locales : favoris (ids de chaînes/contenus), récents (reprise)
- * et contrôle parental. Persistées via DataStore, comme les sources.
+ * Données utilisateur locales : favoris (ids de chaînes/contenus), récents (reprise),
+ * contrôle parental et préférences. Persistées via DataStore, comme les sources.
  */
 class UserStore(private val context: Context) {
 
@@ -56,6 +65,17 @@ class UserStore(private val context: Context) {
     private val favKey = stringPreferencesKey("favorites_json")
     private val recentKey = stringPreferencesKey("recents_json")
     private val parentalKey = stringPreferencesKey("parental_json")
+    private val prefsKey = stringPreferencesKey("prefs_json")
+
+    val prefs: Flow<AppPrefs> = context.userDataStore.data.map { prefs ->
+        val raw = prefs[prefsKey] ?: return@map AppPrefs()
+        runCatching { json.decodeFromString(AppPrefs.serializer(), raw) }.getOrDefault(AppPrefs())
+    }
+
+    suspend fun updatePrefs(transform: (AppPrefs) -> AppPrefs) {
+        val next = transform(prefs.first())
+        context.userDataStore.edit { it[prefsKey] = json.encodeToString(AppPrefs.serializer(), next) }
+    }
     private val favSer = SetSerializer(String.serializer())
     private val recentSer = ListSerializer(RecentItem.serializer())
 

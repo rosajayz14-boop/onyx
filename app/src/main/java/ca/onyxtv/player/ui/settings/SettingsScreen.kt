@@ -103,6 +103,12 @@ fun SettingsScreen(vm: OnyxViewModel) {
         item { AddM3uCard(vm) }
         item { AddXtreamCard(vm) }
 
+        // ---- Lecture ----
+        item { PlaybackCard(vm) }
+
+        // ---- Application (version, mises à jour) ----
+        item { AppCard(vm) }
+
         // ---- Contrôle parental ----
         item { ParentalCard(vm, parental.enabled, parental.lockAtStart) }
         if (parental.enabled) {
@@ -307,5 +313,66 @@ private fun UpdateCard(vm: OnyxViewModel, state: OnyxUiState) {
             "Le catalogue est rafraîchi automatiquement à l'ouverture s'il date de plus de 6 h ; le guide est mis en cache 30 min.",
             color = OnyxMuted, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 8.dp),
         )
+    }
+}
+
+@Composable
+private fun PlaybackCard(vm: OnyxViewModel) {
+    val prefs by vm.prefs.collectAsStateWithLifecycle()
+    FormCard("Lecture") {
+        Text(
+            "La position de lecture est mémorisée quand vous quittez l'app (Accueil, veille) et chaque 5 s.",
+            color = OnyxMuted, style = MaterialTheme.typography.bodyMedium,
+        )
+        Spacer(Modifier.height(8.dp))
+        Button(onClick = { vm.setResumeOnStart(!prefs.resumeOnStart) }) {
+            Text("Reprendre la dernière lecture à l'ouverture : ${if (prefs.resumeOnStart) "Oui" else "Non"}")
+        }
+    }
+}
+
+@Composable
+private fun AppCard(vm: OnyxViewModel) {
+    val update by vm.update.collectAsStateWithLifecycle()
+    val shortSha = ca.onyxtv.player.core.update.UpdateChecker.currentCommit.take(7)
+    FormCard("Application") {
+        Text(
+            "ONYX TV ${ca.onyxtv.player.core.update.UpdateChecker.currentVersion} · build $shortSha" +
+                (update.checkedAt.takeIf { it > 0 }?.let { " · vérifié ${relative(it)}" } ?: ""),
+            color = OnyxMuted, style = MaterialTheme.typography.bodyMedium,
+        )
+        Text(
+            "Les mises à jour sont vérifiées automatiquement une fois par jour ; le catalogue est actualisé chaque jour en arrière-plan.",
+            color = OnyxMuted, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 4.dp),
+        )
+        update.info?.let { info ->
+            Text(
+                "✨ Nouvelle version disponible : ${info.label}" + (info.sizeBytes.takeIf { it > 0 }?.let { " (${it / (1024 * 1024)} Mo)" } ?: ""),
+                color = OnyxCyan, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 10.dp),
+            )
+        }
+        update.downloading?.let { p ->
+            Text("Téléchargement… ${(p * 100).toInt()} %", color = OnyxCyan, modifier = Modifier.padding(top = 6.dp))
+        }
+        update.error?.let { Text(it, color = OnyxLive, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 6.dp)) }
+        Spacer(Modifier.height(10.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            when {
+                update.readyFile != null -> Button(onClick = { vm.installUpdate() }) { Text("📦 Installer la mise à jour") }
+                update.info != null -> Button(onClick = { vm.downloadAndInstallUpdate() }) {
+                    Text(if (update.downloading != null) "Téléchargement…" else "⬇ Télécharger et installer")
+                }
+            }
+            Button(onClick = { vm.checkForUpdate(force = true) }) {
+                Text(if (update.checking) "Vérification…" else "Vérifier les mises à jour")
+            }
+        }
+        if (update.info != null) {
+            Text(
+                "Si l'installation est refusée (« Application non installée »), désinstallez l'ancienne version puis réinstallez : " +
+                    "cela arrive quand la clé de signature a changé.",
+                color = OnyxMuted, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 8.dp),
+            )
+        }
     }
 }

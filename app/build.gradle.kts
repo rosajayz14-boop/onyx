@@ -28,6 +28,13 @@ android {
         versionCode = System.getenv("ONYX_VERSION_CODE")?.toIntOrNull() ?: 1
         versionName = System.getenv("ONYX_VERSION_NAME") ?: "0.1.0"
         vectorDrawables { useSupportLibrary = true }
+
+        // Identifiant du build (commit CI) pour la vérification de mise à jour dans l'app.
+        val gitSha = System.getenv("GITHUB_SHA") ?: "dev"
+        val repo = System.getenv("GITHUB_REPOSITORY") ?: "rosajayz14-boop/onyx"
+        buildConfigField("String", "GIT_SHA", "\"$gitSha\"")
+        buildConfigField("String", "UPDATE_API_URL", "\"https://api.github.com/repos/$repo/releases/tags/tv-latest\"")
+        buildConfigField("String", "UPDATE_APK_URL", "\"https://github.com/$repo/releases/download/tv-latest/onyx-tv.apk\"")
     }
 
     // Signature de release, uniquement si une clé est fournie (voir en-tête du fichier).
@@ -70,7 +77,10 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    buildFeatures { compose = true }
+    buildFeatures {
+        compose = true
+        buildConfig = true
+    }
 
     packaging {
         resources { excludes += "/META-INF/{AL2.0,LGPL2.1}" }
@@ -110,6 +120,9 @@ dependencies {
 
     // Stockage local des listes et préférences
     implementation(libs.androidx.datastore.preferences)
+
+    // Mise à jour quotidienne du catalogue en arrière-plan
+    implementation(libs.androidx.work.runtime.ktx)
 
     // Réseau (Xtream/M3U/EPG), images, sérialisation JSON
     implementation(libs.coil.compose)

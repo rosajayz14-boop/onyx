@@ -3,6 +3,7 @@ package ca.onyxtv.player.viewmodel
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import ca.onyxtv.player.core.data.AppPrefs
 import ca.onyxtv.player.core.data.CatalogCache
 import ca.onyxtv.player.core.data.CatalogSnapshot
 import ca.onyxtv.player.core.data.OnyxRepository
@@ -16,6 +17,8 @@ import ca.onyxtv.player.core.model.EpgProgram
 import ca.onyxtv.player.core.model.PlaylistSource
 import ca.onyxtv.player.core.model.VodItem
 import ca.onyxtv.player.core.net.Http
+import ca.onyxtv.player.core.update.UpdateChecker
+import ca.onyxtv.player.core.update.UpdateInfo
 import ca.onyxtv.player.dvr.RecordingInfo
 import ca.onyxtv.player.dvr.RecordingService
 import ca.onyxtv.player.dvr.RecordingStore
@@ -27,7 +30,9 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.io.File
 import java.util.UUID
+import kotlinx.coroutines.flow.first
 
 /** État global des contenus affichés. */
 data class OnyxUiState(
@@ -51,6 +56,17 @@ data class OnyxUiState(
     val hasContent: Boolean get() = channels.isNotEmpty() || vod.isNotEmpty()
     val sourceErrors: List<String> get() = reports.mapNotNull { r -> r.error?.let { "${r.label} — $it" } }
 }
+
+/** État de la mise à jour de l'application. */
+data class UpdateUi(
+    val info: UpdateInfo? = null,
+    val checking: Boolean = false,
+    /** Progression du téléchargement 0f..1f, null si aucun téléchargement. */
+    val downloading: Float? = null,
+    val readyFile: File? = null,
+    val error: String? = null,
+    val checkedAt: Long = 0,
+)
 
 class OnyxViewModel(app: Application) : AndroidViewModel(app) {
 
@@ -76,6 +92,60 @@ class OnyxViewModel(app: Application) : AndroidViewModel(app) {
         userStore.favorites.stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
     val recents: StateFlow<List<RecentItem>> =
         userStore.recents.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    // ---- Préférences ----
+    val prefs: StateFlow<AppPrefs> =
+        userStore.prefs.stateIn(viewModelScope, SharingStarted.Eagerly, AppPrefs())
+
+    fun setResumeOnStart(enabled: Boolean) {
+        viewModelScope.launch { userStore.updatePrefs { it.copy(resumeOnStart = enabled) } }
+    }
+
+    // ---- Mise à jour de l'application (vérification quotidienne) ----
+    private val _update = MutableStateFlow(UpdateUi())
+    val update: StateFlow<UpdateUi> = _update.asStateFlow()
+
+    /** Vérifie s'il existe une nouvelle version publiée ; au plus une fois par jour sauf [force]. */
+    fun checkForUpdate(force: Boolean = false) {
+        viewModelScope.launch {
+            val now = System.currentTimeMillis()
+            val last = userStore.prefs.first().lastUpdateCheck
+            if (!force && now - last < UPDATE_CHECK_MS) return@launch
+            _update.update { it.copy(checking = true, error = null) }
+            runCatching { UpdateChecker.check() }
+                .onSuccess { info ->
+                    _update.update { it.copy(checking = false, info = info, checkedAt = now) }
+                    userStore.updatePrefs { it.copy(lastUpdateCheck = now) }
+                }
+                .onFailure { e -> _update.update { it.copy(checking = false, error = Http.describe(e), checkedAt = now) } }
+        }
+    }
+
+    /** Télécharge la nouvelle version puis lance l'installateur système. */
+    fun downloadAndInstallUpdate() {
+        if (_update.value.downloading != null) return
+        viewModelScope.launch {
+            _update.update { it.copy(downloading = 0f, error = null) }
+            runCatching { UpdateChecker.download(getApplication<Application>()) { p -> _update.update { it.copy(downloading = p) } } }
+                .onSuccess { file ->
+                    _update.update { it.copy(downloading = null, readyFile = file) }
+                    installUpdate()
+                }
+                .onFailure { e -> _update.update { it.copy(downloading = null, error = "Téléchargement impossible : ${Http.describe(e)}") } }
+        }
+    }
+
+    fun installUpdate() {
+        val file = _update.value.readyFile ?: return
+        val ctx = getApplication<Application>()
+        if (!UpdateChecker.canInstall(ctx)) {
+            UpdateChecker.openInstallPermission(ctx)
+            _update.update { it.copy(error = "Autorisez ONYX TV à installer des applications, puis appuyez de nouveau sur « Installer ».") }
+            return
+        }
+        runCatching { UpdateChecker.install(ctx, file) }
+            .onFailure { e -> _update.update { it.copy(error = "Installation impossible : ${e.message}") } }
+    }
 
     // ---- DVR ----
     val recordings: StateFlow<List<RecordingInfo>> =
@@ -150,6 +220,7 @@ class OnyxViewModel(app: Application) : AndroidViewModel(app) {
             // 2) Rafraîchissement automatique si le cache est absent, vide ou ancien.
             if (cached == null || cached.isEmpty || cached.isStale(AUTO_REFRESH_MS)) refresh()
         }
+        checkForUpdate()
     }
 
     /**
@@ -335,9 +406,14 @@ class OnyxViewModel(app: Application) : AndroidViewModel(app) {
     /** Fiche d'une série (saisons/épisodes), chargée à la demande. */
     suspend fun seriesDetail(item: VodItem) = repo.seriesDetail(item)
 
+    /** Fiche d'un film (résumé, casting, note, bande-annonce), chargée à la demande. */
+    suspend fun movieDetail(item: VodItem) = repo.movieDetail(item)
+
     private companion object {
         /** Au-delà de cet âge, le catalogue est rafraîchi automatiquement à l'ouverture. */
-        const val AUTO_REFRESH_MS = 6 * 3_600_000L
+        const val AUTO_REFRESH_MS = 24 * 3_600_000L
+        /** Vérification de mise à jour de l'application : une fois par jour. */
+        const val UPDATE_CHECK_MS = 24 * 3_600_000L
     }
 }
 

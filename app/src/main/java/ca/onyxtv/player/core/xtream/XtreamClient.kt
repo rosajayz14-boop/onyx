@@ -6,6 +6,7 @@ import ca.onyxtv.player.core.model.Channel
 import ca.onyxtv.player.core.model.EpgProgram
 import ca.onyxtv.player.core.model.Episode
 import ca.onyxtv.player.core.model.MediaKind
+import ca.onyxtv.player.core.model.MovieDetail
 import ca.onyxtv.player.core.model.PlaylistSource
 import ca.onyxtv.player.core.model.SeriesDetail
 import ca.onyxtv.player.core.model.VodItem
@@ -200,6 +201,31 @@ class XtreamClient(
             plot = r.info?.plot,
             coverUrl = r.info?.cover,
             seasons = seasons.mapValues { (_, v) -> v.sortedBy { it.number } },
+        )
+    }
+
+    /** Fiche d'un film : résumé, casting, note, bande-annonce (get_vod_info). */
+    suspend fun movieInfo(src: PlaylistSource.Xtream, streamId: String): MovieDetail {
+        val root = json.parseToJsonElement(Http.get(api(src, "get_vod_info", "&vod_id=$streamId"))) as? JsonObject
+            ?: return MovieDetail()
+        val info = root["info"] as? JsonObject ?: return MovieDetail()
+        val rating10 = info.str("rating")?.toFloatOrNull()?.takeIf { it > 0f }
+            ?: info.str("rating_5based")?.toFloatOrNull()?.takeIf { it > 0f }?.times(2f)
+        val trailer = info.str("youtube_trailer")?.trim()?.takeIf { it.isNotBlank() }?.let {
+            if (it.startsWith("http", true)) it else "https://www.youtube.com/watch?v=$it"
+        }
+        val backdrop = (info["backdrop_path"] as? JsonArray)?.firstOrNull()?.let { (it as? JsonPrimitive)?.content }
+            ?: info.str("movie_image")
+        return MovieDetail(
+            plot = info.str("plot") ?: info.str("description"),
+            cast = info.str("cast") ?: info.str("actors"),
+            director = info.str("director"),
+            genre = info.str("genre"),
+            releaseDate = info.str("releasedate") ?: info.str("release_date"),
+            rating = rating10?.coerceIn(0f, 10f),
+            duration = info.str("duration"),
+            trailerUrl = trailer,
+            backdropUrl = backdrop,
         )
     }
 

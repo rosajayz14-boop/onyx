@@ -29,7 +29,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.tv.material3.Button
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
-import ca.onyxtv.player.core.model.MediaKind
 import ca.onyxtv.player.core.model.VodItem
 import ca.onyxtv.player.player.PlayTarget
 import ca.onyxtv.player.ui.components.EmptyState
@@ -38,6 +37,7 @@ import ca.onyxtv.player.ui.components.LoadingState
 import ca.onyxtv.player.ui.components.MediaCard
 import ca.onyxtv.player.ui.components.Rail
 import ca.onyxtv.player.ui.components.toPlayTarget
+import ca.onyxtv.player.ui.theme.OnyxCyan
 import ca.onyxtv.player.ui.theme.OnyxMuted
 import ca.onyxtv.player.viewmodel.OnyxViewModel
 import ca.onyxtv.player.viewmodel.hiddenGroups
@@ -50,15 +50,16 @@ fun HomeScreen(
     onPlay: (PlayTarget) -> Unit,
     onGoLive: () -> Unit,
     onGoSettings: () -> Unit,
-    onOpenSeries: (VodItem) -> Unit,
+    onOpenDetail: (VodItem) -> Unit,
 ) {
-    // Une série s'ouvre sur sa fiche (saisons/épisodes) ; un film se lit directement.
-    val openVod: (VodItem) -> Unit = { v -> if (v.kind == MediaKind.SERIES) onOpenSeries(v) else onPlay(v.toPlayTarget()) }
+    // Un film comme une série s'ouvre sur sa fiche (résumé, casting, bande-annonce / épisodes).
+    val openVod: (VodItem) -> Unit = { v -> onOpenDetail(v) }
     val state by vm.state.collectAsStateWithLifecycle()
     val favorites by vm.favorites.collectAsStateWithLifecycle()
     val recents by vm.recents.collectAsStateWithLifecycle()
     val parental by vm.parental.collectAsStateWithLifecycle()
     val unlocked by vm.unlockedGroups.collectAsStateWithLifecycle()
+    val update by vm.update.collectAsStateWithLifecycle()
     val hidden = hiddenGroups(parental, unlocked)
     // Les catégories verrouillées (contrôle parental) n'apparaissent pas tant qu'elles ne sont pas déverrouillées.
     val channels = remember(state.channels, hidden) { state.channels.filterNot { it.groupTitle in hidden } }
@@ -123,6 +124,16 @@ fun HomeScreen(
             .padding(start = 28.dp, end = 36.dp),
         contentPadding = PaddingValues(top = 28.dp, bottom = 36.dp),
     ) {
+        update.info?.let { info ->
+            item {
+                Text(
+                    "✨ Nouvelle version disponible (${info.label}) — Réglages → Application pour l'installer.",
+                    color = OnyxCyan,
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.padding(bottom = 10.dp),
+                )
+            }
+        }
         if (state.loading && state.hasContent) {
             item {
                 Text(
