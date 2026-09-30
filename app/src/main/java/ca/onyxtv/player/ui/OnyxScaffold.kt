@@ -196,6 +196,9 @@ fun OnyxRoot(vm: OnyxViewModel = viewModel()) {
                 onSwitch = { playing = it },
                 zapToNumber = { n -> vm.channelByNumber(n)?.toPlayTarget() },
                 nowPlaying = { t -> vm.nowPlaying(t) },
+                introSkipSeconds = prefs.introSkipSeconds,
+                seekBackSeconds = prefs.seekBackSeconds,
+                seekForwardSeconds = prefs.seekForwardSeconds,
             )
         }
     }

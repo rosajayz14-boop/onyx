@@ -133,6 +133,9 @@ fun PlayerScreen(
     zapToNumber: ((Int) -> PlayTarget?)? = null,
     /** Titre du programme en cours (EPG) pour le direct. */
     nowPlaying: (suspend (PlayTarget) -> String?)? = null,
+    introSkipSeconds: Int = 85,
+    seekBackSeconds: Int = 10,
+    seekForwardSeconds: Int = 30,
 ) {
     val context = LocalContext.current
     val exo = remember { ExoPlayer.Builder(context).build().apply { playWhenReady = true } }
@@ -149,6 +152,14 @@ fun PlayerScreen(
     var digits by remember { mutableStateOf("") }
     var ended by remember { mutableStateOf(false) }
     var countdown by remember { mutableIntStateOf(0) }
+    var posMs by remember { mutableStateOf(0L) }
+    var durMs by remember { mutableStateOf(0L) }
+    var seekNote by remember { mutableStateOf<String?>(null) }
+    var playerView by remember { mutableStateOf<PlayerView?>(null) }
+
+    // Fenêtres « intro » (3 premières minutes) et « générique » (3 dernières minutes) pour la VOD.
+    val inIntro = !target.isLive && durMs > 10 * 60_000L && posMs < 3 * 60_000L
+    val inCredits = !target.isLive && durMs > 0 && target.next != null && durMs - posMs in 1..(3 * 60_000L)
 
     val currentTarget by rememberUpdatedState(target)
     val currentOnProgress by rememberUpdatedState(onProgress)
@@ -170,6 +181,23 @@ fun PlayerScreen(
         exo.prepare()
         if (!target.isLive && target.startPositionMs > 0) exo.seekTo(target.startPositionMs)
         exo.play()
+    }
+
+    fun seekBy(deltaMs: Long) {
+        if (currentTarget.isLive) return
+        val dur = exo.duration.takeIf { it != C.TIME_UNSET } ?: return
+        val to = (exo.currentPosition + deltaMs).coerceIn(0L, dur)
+        exo.seekTo(to)
+        posMs = to
+        seekNote = (if (deltaMs >= 0) "⏩ +" else "⏪ −") + "${kotlin.math.abs(deltaMs) / 1000} s   ${fmtClock(to)} / ${fmtClock(dur)}"
+    }
+
+    fun skipIntro() { seekBy(introSkipSeconds * 1000L); seekNote = "⏭ Intro passée (+$introSkipSeconds s)" }
+
+    fun skipCredits(): Boolean {
+        val next = currentTarget.next ?: return false
+        currentOnSwitch(next)
+        return true
     }
 
     fun selectTrack(o: TrackOption, type: Int) {
@@ -280,6 +308,16 @@ fun PlayerScreen(
         if (n != null) currentZapToNumber?.invoke(n)?.let(currentOnSwitch)
     }
 
+    // Position courante (fenêtres intro / générique, affichage).
+    LaunchedEffect(target.url) {
+        while (isActive) {
+            posMs = exo.currentPosition
+            durMs = exo.duration.takeIf { it != C.TIME_UNSET } ?: 0L
+            delay(1_000)
+        }
+    }
+    LaunchedEffect(seekNote) { if (seekNote != null) { delay(1_800); seekNote = null } }
+
     // Remontée périodique de la progression (reprise / récents).
     LaunchedEffect(target.url) {
         while (isActive) {
@@ -315,8 +353,15 @@ fun PlayerScreen(
                     return@onPreviewKeyEvent if (ev.key == Key.Menu) { panelOpen = false; true } else false
                 }
                 val digit = DIGIT_KEYS[ev.key]
+                val controllerShown = playerView?.isControllerFullyVisible == true
                 when {
                     ev.key == Key.Menu -> { panelOpen = true; true }
+                    // VOD : ▲ passe l'intro au début, lance l'épisode suivant à la fin.
+                    !currentTarget.isLive && ev.key == Key.DirectionUp && inCredits -> skipCredits()
+                    !currentTarget.isLive && ev.key == Key.DirectionUp && inIntro -> { skipIntro(); true }
+                    // VOD : ◀ / ▶ = recul / avance quand la barre de contrôle est masquée.
+                    !currentTarget.isLive && !controllerShown && ev.key == Key.DirectionLeft -> { seekBy(-seekBackSeconds * 1000L); true }
+                    !currentTarget.isLive && !controllerShown && ev.key == Key.DirectionRight -> { seekBy(seekForwardSeconds * 1000L); true }
                     digit != null && currentTarget.isLive && currentZapToNumber != null -> {
                         if (digits.length < 4) digits += digit
                         true
@@ -337,6 +382,7 @@ fun PlayerScreen(
                     setShowPreviousButton(false)
                     controllerShowTimeoutMs = 4000
                     resizeMode = resize
+                    playerView = this
                     // Repli : CH+/CH− arrivent ici même si Compose ne les intercepte pas.
                     setOnKeyListener { _, keyCode, event ->
                         if (event.action != KeyEvent.ACTION_DOWN) return@setOnKeyListener false
@@ -390,6 +436,28 @@ fun PlayerScreen(
             }
         }
 
+        // Indications contextuelles (intro / générique / recul-avance) en bas à droite.
+        val hint = when {
+            ended || error != null || panelOpen -> null
+            seekNote != null -> seekNote
+            inCredits -> "▲ Passer le générique → épisode suivant"
+            inIntro -> "▲ Passer l'intro (+$introSkipSeconds s)"
+            else -> null
+        }
+        hint?.let {
+            Text(
+                it,
+                style = MaterialTheme.typography.titleMedium,
+                color = Color.White,
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(bottom = 96.dp, end = 28.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(Color(0xCC000000))
+                    .padding(horizontal = 16.dp, vertical = 10.dp),
+            )
+        }
+
         // Numéro de chaîne en cours de saisie.
         if (digits.isNotEmpty()) {
             Text(
@@ -426,6 +494,15 @@ fun PlayerScreen(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Text("Lecture", style = MaterialTheme.typography.headlineMedium, color = Color.White)
+
+                if (!target.isLive) {
+                    Text("Navigation", style = MaterialTheme.typography.titleMedium, color = OnyxCyan, modifier = Modifier.padding(top = 8.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(onClick = { skipIntro(); panelOpen = false }) { Text("⏭ Passer l'intro") }
+                        if (target.next != null) Button(onClick = { skipCredits() }) { Text("⏭ Épisode suivant") }
+                    }
+                    Text("◀ −$seekBackSeconds s   ▶ +$seekForwardSeconds s   ▲ intro / générique", color = OnyxMuted, style = MaterialTheme.typography.bodyMedium)
+                }
 
                 Text("Format d'image", style = MaterialTheme.typography.titleMedium, color = OnyxCyan, modifier = Modifier.padding(top = 8.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

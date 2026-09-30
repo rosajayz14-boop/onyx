@@ -101,6 +101,14 @@ class OnyxViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { userStore.updatePrefs { it.copy(resumeOnStart = enabled) } }
     }
 
+    fun setIntroSkip(seconds: Int) {
+        viewModelScope.launch { userStore.updatePrefs { it.copy(introSkipSeconds = seconds) } }
+    }
+
+    fun setSeekSteps(back: Int, forward: Int) {
+        viewModelScope.launch { userStore.updatePrefs { it.copy(seekBackSeconds = back, seekForwardSeconds = forward) } }
+    }
+
     // ---- Mise à jour de l'application (vérification quotidienne) ----
     private val _update = MutableStateFlow(UpdateUi())
     val update: StateFlow<UpdateUi> = _update.asStateFlow()
