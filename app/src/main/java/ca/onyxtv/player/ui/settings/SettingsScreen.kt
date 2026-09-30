@@ -14,6 +14,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.material3.MaterialTheme as Md3
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.darkColorScheme as md3DarkColors
@@ -189,14 +192,44 @@ private fun FormCard(title: String, content: @Composable ColumnScope.() -> Unit)
 }
 
 @Composable
-private fun Field(label: String, value: String, onValue: (String) -> Unit) {
+private fun Field(
+    label: String,
+    value: String,
+    keyboard: KeyboardType = KeyboardType.Text,
+    onFocus: (() -> Unit)? = null,
+    onValue: (String) -> Unit,
+) {
     OutlinedTextField(
         value = value,
         onValueChange = onValue,
         label = { androidx.compose.material3.Text(label) },
         singleLine = true,
-        modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+        // Sans autocorrection : les claviers TV affichent alors un clavier « brut » avec chiffres.
+        keyboardOptions = KeyboardOptions(keyboardType = keyboard, autoCorrect = false),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 6.dp)
+            .onFocusChanged { if (it.isFocused) onFocus?.invoke() },
     )
+}
+
+/**
+ * Touches rapides (chiffres et symboles d'adresses) qui écrivent dans le dernier champ
+ * sélectionné — indépendant du clavier de la box (certains n'ont pas de rangée de chiffres).
+ */
+@Composable
+private fun QuickKeys(target: String?, onKey: (String) -> Unit, onBackspace: () -> Unit) {
+    Text(
+        if (target == null) "Touches rapides : sélectionnez d'abord un champ." else "Touches rapides → $target",
+        color = OnyxMuted, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 8.dp),
+    )
+    Row(horizontalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.padding(top = 4.dp)) {
+        "1234567890".forEach { c -> Button(onClick = { onKey(c.toString()) }) { Text(c.toString()) } }
+    }
+    Row(horizontalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.padding(top = 4.dp)) {
+        listOf(".", ":", "/", "@", "-", "_", "http://").forEach { k -> Button(onClick = { onKey(k) }) { Text(k) } }
+        Button(onClick = onBackspace) { Text("⌫") }
+    }
 }
 
 @Composable
@@ -204,11 +237,17 @@ private fun AddM3uCard(vm: OnyxViewModel) {
     var label by remember { mutableStateOf("") }
     var url by remember { mutableStateOf("") }
     var epg by remember { mutableStateOf("") }
+    var active by remember { mutableStateOf<String?>(null) }
 
     FormCard("Ajouter une liste M3U") {
-        Field("Nom", label) { label = it }
-        Field("URL .m3u / .m3u8", url) { url = it }
-        Field("URL EPG XMLTV (optionnel)", epg) { epg = it }
+        Field("Nom", label, onFocus = { active = "Nom" }) { label = it }
+        Field("URL .m3u / .m3u8", url, KeyboardType.Uri, onFocus = { active = "URL" }) { url = it }
+        Field("URL EPG XMLTV (optionnel)", epg, KeyboardType.Uri, onFocus = { active = "EPG" }) { epg = it }
+        QuickKeys(
+            target = active,
+            onKey = { k -> when (active) { "Nom" -> label += k; "URL" -> url += k; "EPG" -> epg += k } },
+            onBackspace = { when (active) { "Nom" -> label = label.dropLast(1); "URL" -> url = url.dropLast(1); "EPG" -> epg = epg.dropLast(1) } },
+        )
         Spacer(Modifier.height(8.dp))
         Button(onClick = {
             if (url.isNotBlank()) {
@@ -225,12 +264,27 @@ private fun AddXtreamCard(vm: OnyxViewModel) {
     var server by remember { mutableStateOf("") }
     var user by remember { mutableStateOf("") }
     var pass by remember { mutableStateOf("") }
+    var active by remember { mutableStateOf<String?>(null) }
 
     FormCard("Ajouter un compte Xtream Codes") {
-        Field("Nom", label) { label = it }
-        Field("Serveur (http://exemple.tv:8080)", server) { server = it }
-        Field("Nom d'utilisateur", user) { user = it }
-        Field("Mot de passe", pass) { pass = it }
+        Field("Nom", label, onFocus = { active = "Nom" }) { label = it }
+        Field("Serveur (http://exemple.tv:8080)", server, KeyboardType.Uri, onFocus = { active = "Serveur" }) { server = it }
+        Field("Nom d'utilisateur", user, KeyboardType.VisiblePassword, onFocus = { active = "Utilisateur" }) { user = it }
+        Field("Mot de passe", pass, KeyboardType.VisiblePassword, onFocus = { active = "Mot de passe" }) { pass = it }
+        QuickKeys(
+            target = active,
+            onKey = { k ->
+                when (active) {
+                    "Nom" -> label += k; "Serveur" -> server += k; "Utilisateur" -> user += k; "Mot de passe" -> pass += k
+                }
+            },
+            onBackspace = {
+                when (active) {
+                    "Nom" -> label = label.dropLast(1); "Serveur" -> server = server.dropLast(1)
+                    "Utilisateur" -> user = user.dropLast(1); "Mot de passe" -> pass = pass.dropLast(1)
+                }
+            },
+        )
         Spacer(Modifier.height(8.dp))
         Button(onClick = {
             if (server.isNotBlank() && user.isNotBlank()) {
@@ -252,7 +306,7 @@ private fun ParentalCard(vm: OnyxViewModel, enabled: Boolean, lockAtStart: Boole
             color = OnyxMuted,
             style = MaterialTheme.typography.bodyMedium,
         )
-        Field("Nouveau code PIN (4 chiffres)", pin) { v -> if (v.length <= 4 && v.all { it.isDigit() }) pin = v }
+        Field("Nouveau code PIN (4 chiffres)", pin, KeyboardType.NumberPassword) { v -> if (v.length <= 4 && v.all { it.isDigit() }) pin = v }
         Spacer(Modifier.height(8.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Button(onClick = { if (pin.length == 4) { vm.setPin(pin); pin = "" } }) {
