@@ -35,15 +35,19 @@ data class CatalogSnapshot(
 }
 
 /**
- * Cache disque du catalogue : l'app s'ouvre instantanément sur les données de la dernière
- * mise à jour, puis rafraîchit en arrière-plan si elles sont anciennes.
+ * Catalogue mémorisé sur le disque : chaînes, films et séries restent disponibles quand on
+ * quitte l'application. Stocké dans l'espace PERMANENT de l'app (filesDir), jamais purgé par
+ * le système contrairement au cache. L'app s'ouvre instantanément dessus, puis rafraîchit
+ * en arrière-plan si les données sont anciennes.
  */
 class CatalogCache(context: Context) {
 
-    private val file = File(context.cacheDir, "catalog.json")
+    private val file = File(context.filesDir, "catalog.json")
+    private val legacy = File(context.cacheDir, "catalog.json") // ancien emplacement (migré)
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
     suspend fun load(): CatalogSnapshot? = withContext(Dispatchers.IO) {
+        if (!file.exists() && legacy.exists()) runCatching { legacy.copyTo(file, overwrite = true); legacy.delete() }
         if (!file.exists()) return@withContext null
         runCatching { json.decodeFromString(CatalogSnapshot.serializer(), file.readText()) }.getOrNull()
     }
