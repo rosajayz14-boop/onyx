@@ -154,7 +154,7 @@ jobs:
         run: |
           gh release delete tv-latest --yes --cleanup-tag 2>/dev/null || true
           gh release create tv-latest dist/onyx-tv.apk \
-            --title "ONYX TV — dernière version (${{ steps.ver.outputs.version_name }})" \
+            --title "ONYX TV ${{ steps.ver.outputs.version_name }} · build ${{ github.run_number }}" \
             --notes "APK pour Android TV / Fire TV / Google TV — version ${{ steps.ver.outputs.version_name }}.
 
           **Installation via Downloader** — URL fixe (ne change jamais) :

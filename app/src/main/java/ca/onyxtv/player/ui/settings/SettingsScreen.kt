@@ -367,10 +367,13 @@ private fun AppCard(vm: OnyxViewModel) {
     val shortSha = ca.onyxtv.player.core.update.UpdateChecker.currentCommit.take(7)
     FormCard("Application") {
         Text(
-            "ONYX TV ${ca.onyxtv.player.core.update.UpdateChecker.currentVersion} · build $shortSha" +
+            "ONYX TV ${ca.onyxtv.player.core.update.UpdateChecker.currentVersion} · build ${ca.onyxtv.player.BuildConfig.VERSION_CODE} ($shortSha)" +
                 (update.checkedAt.takeIf { it > 0 }?.let { " · vérifié ${relative(it)}" } ?: ""),
             color = OnyxMuted, style = MaterialTheme.typography.bodyMedium,
         )
+        if (update.checkedAt > 0 && update.info == null && update.error == null && !update.checking) {
+            Text("✓ Vous avez la dernière version.", color = OnyxCyan, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 6.dp))
+        }
         Text(
             "Les mises à jour sont vérifiées automatiquement une fois par jour ; le catalogue est actualisé chaque jour en arrière-plan.",
             color = OnyxMuted, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 4.dp),
