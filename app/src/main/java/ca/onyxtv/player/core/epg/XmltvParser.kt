@@ -18,7 +18,11 @@ object XmltvParser {
     private val TIME_FMT = SimpleDateFormat("yyyyMMddHHmmss Z", Locale.US)
     private val TIME_FMT_NO_TZ = SimpleDateFormat("yyyyMMddHHmmss", Locale.US)
 
-    fun parse(input: InputStream): List<EpgProgram> {
+    /**
+     * Parse un XMLTV. [fromMs]/[toMs] limitent les programmes conservés à une fenêtre de temps :
+     * indispensable sur les guides de fournisseurs (plusieurs jours × milliers de chaînes).
+     */
+    fun parse(input: InputStream, fromMs: Long = Long.MIN_VALUE, toMs: Long = Long.MAX_VALUE): List<EpgProgram> {
         val out = ArrayList<EpgProgram>()
         val parser = Xml.newPullParser()
         parser.setFeature(XmlPullParser.FEATURE_PROCESS_NAMESPACES, false)
@@ -56,7 +60,7 @@ object XmltvParser {
                     "title", "desc" -> current = null
                     "programme" -> {
                         val ch = channel
-                        if (ch != null && stop > start) {
+                        if (ch != null && stop > start && stop >= fromMs && start <= toMs) {
                             out += EpgProgram(
                                 channelId = ch,
                                 title = title ?: "Programme",

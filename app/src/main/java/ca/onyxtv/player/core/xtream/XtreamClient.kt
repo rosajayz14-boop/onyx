@@ -49,6 +49,10 @@ class XtreamClient(
     private fun api(src: PlaylistSource.Xtream, action: String, extra: String = ""): String =
         "${base(src)}/player_api.php?username=${enc(src.username)}&password=${enc(src.password)}&action=$action$extra"
 
+    /** Guide complet XMLTV du compte (même identifiants), comme TiviMate / Helix. */
+    fun xmltvUrl(src: PlaylistSource.Xtream): String =
+        "${base(src)}/xmltv.php?username=${enc(src.username)}&password=${enc(src.password)}"
+
     /** URL d'authentification (sans action) : renvoie user_info / server_info. */
     private fun authUrl(src: PlaylistSource.Xtream): String =
         "${base(src)}/player_api.php?username=${enc(src.username)}&password=${enc(src.password)}"

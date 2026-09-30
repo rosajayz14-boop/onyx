@@ -13,6 +13,7 @@ import ca.onyxtv.player.core.xtream.XtreamClient
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.sync.withLock
 
 /**
  * Dépôt central : agrège toutes les sources configurées en listes prêtes pour l'UI.
@@ -109,33 +110,58 @@ class OnyxRepository(
 
         val sources = store.sources.first()
         val result: List<EpgProgram> = run {
-            // Xtream : EPG court par stream_id, sur la source de la chaîne
+            // Xtream : 1) guide complet xmltv.php du compte (une seule descente pour toutes les
+            // chaînes, plusieurs jours), 2) get_short_epg en secours si la chaîne n'y figure pas.
             channel.streamId?.let { sid ->
                 val sourceId = channel.id.split(":").getOrNull(1)
-                sources.filterIsInstance<PlaylistSource.Xtream>()
-                    .firstOrNull { it.id == sourceId }
-                    ?.let { src -> return@run runCatching { xt.shortEpg(src, sid, limit = 30) }.getOrDefault(emptyList()) }
+                val src = sources.filterIsInstance<PlaylistSource.Xtream>().firstOrNull { it.id == sourceId }
+                    ?: return@run emptyList()
+                val fromXmltv = channel.epgChannelId?.takeIf { it.isNotBlank() }?.let { epgId ->
+                    xmltv(xt.xmltvUrl(src)).filter { it.channelId.equals(epgId, ignoreCase = true) }
+                }.orEmpty()
+                if (fromXmltv.isNotEmpty()) return@run fromXmltv.sortedBy { it.start }
+                return@run runCatching { xt.shortEpg(src, sid, limit = 30) }.getOrDefault(emptyList())
             }
             // M3U : XMLTV téléchargé une fois (cache), filtré sur le tvg-id
             val epgId = channel.epgChannelId ?: return@run emptyList()
             val m3u = sources.filterIsInstance<PlaylistSource.M3u>().firstOrNull { !it.epgUrl.isNullOrBlank() }
                 ?: return@run emptyList()
-            xmltv(m3u.epgUrl!!).filter { it.channelId == epgId }
+            xmltv(m3u.epgUrl!!).filter { it.channelId.equals(epgId, ignoreCase = true) }.sortedBy { it.start }
         }
         synchronized(epgByChannel) { epgByChannel[channel.id] = Cached(now, result) }
         return result
     }
 
+    private val xmltvMutex = kotlinx.coroutines.sync.Mutex()
+
+    /**
+     * Guide XMLTV téléchargé EN FLUX vers un fichier temporaire puis parsé sur une fenêtre
+     * [maintenant − 6 h ; + 36 h] : mémoire maîtrisée même avec des guides de 100 Mo.
+     * Un seul téléchargement à la fois par URL (les écrans demandent l'EPG en parallèle).
+     */
     private suspend fun xmltv(url: String): List<EpgProgram> {
         val now = System.currentTimeMillis()
         synchronized(xmltvByUrl) { xmltvByUrl[url] }
             ?.takeIf { now - it.at < XMLTV_TTL_MS }
             ?.let { return it.value }
-        val parsed = runCatching {
-            Http.getBytes(url).inputStream().use { XmltvParser.parse(it) }
-        }.getOrDefault(emptyList())
-        synchronized(xmltvByUrl) { xmltvByUrl[url] = Cached(now, parsed) }
-        return parsed
+        return xmltvMutex.withLock {
+            synchronized(xmltvByUrl) { xmltvByUrl[url] }?.takeIf { now - it.at < XMLTV_TTL_MS }?.let { return@withLock it.value }
+            val parsed = runCatching {
+                val dir = Http.tempDir
+                if (dir != null) {
+                    dir.mkdirs()
+                    val file = java.io.File(dir, "epg-${url.hashCode()}.xml")
+                    try {
+                        Http.getToFile(url, file)
+                        file.inputStream().buffered().use { XmltvParser.parse(it, now - 6 * 3_600_000L, now + 36 * 3_600_000L) }
+                    } finally { file.delete() }
+                } else {
+                    Http.getBytes(url).inputStream().use { XmltvParser.parse(it, now - 6 * 3_600_000L, now + 36 * 3_600_000L) }
+                }
+            }.getOrDefault(emptyList())
+            synchronized(xmltvByUrl) { xmltvByUrl[url] = Cached(now, parsed) }
+            parsed
+        }
     }
 
     // ---- Rattrapage / séries ----
