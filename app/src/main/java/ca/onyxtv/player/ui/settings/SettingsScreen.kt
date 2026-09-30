@@ -227,7 +227,7 @@ private fun QuickKeys(target: String?, onKey: (String) -> Unit, onBackspace: () 
         "1234567890".forEach { c -> Button(onClick = { onKey(c.toString()) }) { Text(c.toString()) } }
     }
     Row(horizontalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.padding(top = 4.dp)) {
-        listOf(".", ":", "/", "@", "-", "_", "http://").forEach { k -> Button(onClick = { onKey(k) }) { Text(k) } }
+        listOf(".", ":", "/", "@", "-", "_").forEach { k -> Button(onClick = { onKey(k) }) { Text(k) } }
         Button(onClick = onBackspace) { Text("⌫") }
     }
 }
@@ -261,37 +261,38 @@ private fun AddM3uCard(vm: OnyxViewModel) {
 @Composable
 private fun AddXtreamCard(vm: OnyxViewModel) {
     var label by remember { mutableStateOf("") }
-    var server by remember { mutableStateOf("") }
     var user by remember { mutableStateOf("") }
     var pass by remember { mutableStateOf("") }
     var active by remember { mutableStateOf<String?>(null) }
+    // Serveur figé (BuildConfig.DEFAULT_SERVER) : seul le compte est demandé.
+    val server = ca.onyxtv.player.BuildConfig.DEFAULT_SERVER
 
-    FormCard("Ajouter un compte Xtream Codes") {
-        Field("Nom", label, onFocus = { active = "Nom" }) { label = it }
-        Field("Serveur (http://exemple.tv:8080)", server, KeyboardType.Uri, onFocus = { active = "Serveur" }) { server = it }
+    FormCard("Ajouter un compte") {
+        Text(
+            "Serveur : ${server.removePrefix("http://").removePrefix("https://")}  ·  entrez simplement votre identifiant et votre mot de passe.",
+            color = OnyxMuted, style = MaterialTheme.typography.bodyMedium,
+        )
+        Field("Nom (optionnel)", label, onFocus = { active = "Nom" }) { label = it }
         Field("Nom d'utilisateur", user, KeyboardType.Ascii, onFocus = { active = "Utilisateur" }) { user = it }
         Field("Mot de passe", pass, KeyboardType.Ascii, onFocus = { active = "Mot de passe" }) { pass = it }
         QuickKeys(
             target = active,
             onKey = { k ->
-                when (active) {
-                    "Nom" -> label += k; "Serveur" -> server += k; "Utilisateur" -> user += k; "Mot de passe" -> pass += k
-                }
+                when (active) { "Nom" -> label += k; "Utilisateur" -> user += k; "Mot de passe" -> pass += k }
             },
             onBackspace = {
                 when (active) {
-                    "Nom" -> label = label.dropLast(1); "Serveur" -> server = server.dropLast(1)
-                    "Utilisateur" -> user = user.dropLast(1); "Mot de passe" -> pass = pass.dropLast(1)
+                    "Nom" -> label = label.dropLast(1); "Utilisateur" -> user = user.dropLast(1); "Mot de passe" -> pass = pass.dropLast(1)
                 }
             },
         )
         Spacer(Modifier.height(8.dp))
         Button(onClick = {
-            if (server.isNotBlank() && user.isNotBlank()) {
-                vm.addXtream(label, server, user, pass)
-                label = ""; server = ""; user = ""; pass = ""
+            if (user.isNotBlank() && pass.isNotBlank()) {
+                vm.addXtream(label.ifBlank { "Mon compte" }, server, user, pass)
+                label = ""; user = ""; pass = ""
             }
-        }) { Text("Ajouter le compte") }
+        }) { Text("Connecter le compte") }
     }
 }
 

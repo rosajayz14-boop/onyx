@@ -33,6 +33,8 @@ android {
         val gitSha = System.getenv("GITHUB_SHA") ?: "dev"
         val repo = System.getenv("GITHUB_REPOSITORY") ?: "rosajayz14-boop/onyx"
         buildConfigField("String", "GIT_SHA", "\"$gitSha\"")
+        // Serveur Xtream figé : les utilisateurs ne saisissent que identifiant + mot de passe.
+        buildConfigField("String", "DEFAULT_SERVER", "\"http://vpn.tvmoderne.ca\"")
         buildConfigField("String", "UPDATE_API_URL", "\"https://api.github.com/repos/$repo/releases/tags/tv-latest\"")
         buildConfigField("String", "UPDATE_APK_URL", "\"https://github.com/$repo/releases/download/tv-latest/onyx-tv.apk\"")
     }
