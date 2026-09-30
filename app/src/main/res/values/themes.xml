@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Thème système minimal (l'UI réelle est rendue par Compose for TV / OnyxTheme).
+         On garde un fond sombre pour éviter tout flash blanc au démarrage. -->
+    <style name="Theme.OnyxTV" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/onyx_bg</item>
+        <item name="android:colorBackground">@color/onyx_bg</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+    </style>
+</resources>

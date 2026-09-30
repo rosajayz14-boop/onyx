@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="onyx_bg">#FF05050A</color>
+    <color name="onyx_bg2">#FF0B0C14</color>
+    <color name="onyx_surface">#FF12131D</color>
+    <color name="onyx_text">#FFF4F6FC</color>
+    <color name="onyx_accent">#FF8B5CF6</color>
+    <color name="onyx_accent2">#FF22D3EE</color>
+</resources>

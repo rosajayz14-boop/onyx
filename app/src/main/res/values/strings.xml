@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">ONYX TV</string>
+
+    <!-- Navigation -->
+    <string name="nav_search">Recherche</string>
+    <string name="nav_home">Accueil</string>
+    <string name="nav_live">TV en direct</string>
+    <string name="nav_vod">Films &amp; Séries</string>
+    <string name="nav_mosaic">Mosaïque</string>
+    <string name="nav_dvr">Enregistrements</string>
+    <string name="nav_settings">Réglages</string>
+
+    <!-- Réglages -->
+    <string name="settings_playlists">Listes de lecture</string>
+    <string name="settings_add_m3u">Ajouter une liste M3U</string>
+    <string name="settings_add_xtream">Ajouter un compte Xtream Codes</string>
+    <string name="settings_url">URL du serveur</string>
+    <string name="settings_username">Nom d’utilisateur</string>
+    <string name="settings_password">Mot de passe</string>
+    <string name="settings_save">Enregistrer</string>
+
+    <!-- Divers -->
+    <string name="live_now">En direct maintenant</string>
+    <string name="loading">Chargement…</string>
+    <string name="empty_playlists">Aucune liste configurée. Ajoutez une source dans Réglages.</string>
+</resources>

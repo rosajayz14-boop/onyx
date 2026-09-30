@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Bannière TV 320x180 (ratio requis par Android TV). Marque ONYX originale.
+     À remplacer par un visuel PNG haute définition avant publication. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="320dp"
+    android:height="180dp"
+    android:viewportWidth="320"
+    android:viewportHeight="180">
+
+    <path android:pathData="M0,0h320v180h-320z" android:fillColor="#05050A" />
+    <path android:pathData="M0,0h320v180h-320z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:centerX="250" android:centerY="20" android:gradientRadius="220"
+                android:type="radial">
+                <item android:offset="0.0" android:color="#338B5CF6" />
+                <item android:offset="1.0" android:color="#0022D3EE" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- marque hexagonale -->
+    <group android:translateX="34" android:translateY="58">
+        <path
+            android:pathData="M32,2 L56,15.5 L56,42.5 L32,56 L8,42.5 L8,15.5 Z"
+            android:strokeWidth="4.5"
+            android:strokeLineJoin="round">
+            <aapt:attr name="android:strokeColor">
+                <gradient android:startX="8" android:startY="2" android:endX="56" android:endY="56" android:type="linear">
+                    <item android:offset="0.0" android:color="#FF8B5CF6" />
+                    <item android:offset="1.0" android:color="#FF22D3EE" />
+                </gradient>
+            </aapt:attr>
+        </path>
+        <path android:pathData="M32,29 m-9,0 a9,9 0 1,0 18,0 a9,9 0 1,0 -18,0 Z" android:fillColor="#FF22D3EE" />
+    </group>
+
+    <!-- lettrage stylisé O N Y X (barres) -->
+    <group android:translateX="120" android:translateY="78">
+        <path android:pathData="M4,0 h150 v6 h-150 z" android:fillColor="#FFF4F6FC" />
+        <path android:pathData="M4,16 h96 v5 h-96 z" android:fillColor="#99A2A8C6" />
+    </group>
+</vector>
