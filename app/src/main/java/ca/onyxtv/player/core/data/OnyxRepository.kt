@@ -5,6 +5,7 @@ import ca.onyxtv.player.core.m3u.M3uParser
 import ca.onyxtv.player.core.model.Channel
 import ca.onyxtv.player.core.model.EpgProgram
 import ca.onyxtv.player.core.model.PlaylistSource
+import ca.onyxtv.player.core.model.SeriesDetail
 import ca.onyxtv.player.core.model.VodItem
 import ca.onyxtv.player.core.net.Http
 import ca.onyxtv.player.core.xtream.XtreamClient
@@ -39,13 +40,24 @@ class OnyxRepository(
     /** Teste un compte Xtream et renvoie un message d'état lisible. */
     suspend fun probeXtream(src: PlaylistSource.Xtream): String = xt.probe(src)
 
-    /** Contenus VOD (Xtream uniquement pour le MVP ; une M3U mélange souvent tout). */
+    /** Contenus VOD : films + séries des comptes Xtream (une M3U mélange souvent tout). */
     suspend fun vod(): List<VodItem> {
         val out = ArrayList<VodItem>()
         store.sources.first().filterIsInstance<PlaylistSource.Xtream>().forEach { source ->
             out += runCatching { xt.vodStreams(source) }.getOrDefault(emptyList())
+            out += runCatching { xt.series(source) }.getOrDefault(emptyList())
         }
         return out
+    }
+
+    /** Fiche complète d'une série (saisons/épisodes). Null si la source n'existe plus. */
+    suspend fun seriesDetail(item: VodItem): SeriesDetail? {
+        val seriesId = item.seriesId ?: return null
+        // id = "xt:<sourceId>:series:<seriesId>"
+        val sourceId = item.id.split(":").getOrNull(1) ?: return null
+        val src = store.sources.first().filterIsInstance<PlaylistSource.Xtream>()
+            .firstOrNull { it.id == sourceId } ?: return null
+        return xt.seriesInfo(src, seriesId, item.name)
     }
 
     /** Guide (now/next) pour une chaîne. Xtream via short_epg ; M3U via XMLTV. */

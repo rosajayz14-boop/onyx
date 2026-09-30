@@ -4,11 +4,17 @@ import android.util.Base64
 import ca.onyxtv.player.core.model.Category
 import ca.onyxtv.player.core.model.Channel
 import ca.onyxtv.player.core.model.EpgProgram
+import ca.onyxtv.player.core.model.Episode
 import ca.onyxtv.player.core.model.MediaKind
 import ca.onyxtv.player.core.model.PlaylistSource
+import ca.onyxtv.player.core.model.SeriesDetail
 import ca.onyxtv.player.core.model.VodItem
 import ca.onyxtv.player.core.net.Http
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import java.net.URLEncoder
 
 /**
@@ -114,6 +120,83 @@ class XtreamClient(
             )
         }
     }
+
+    fun episodeUrl(src: PlaylistSource.Xtream, episodeId: String, ext: String?): String =
+        "${base(src)}/series/${enc(src.username)}/${enc(src.password)}/$episodeId.${ext ?: "mp4"}"
+
+    suspend fun seriesCategories(src: PlaylistSource.Xtream): List<Category> =
+        getList<XtCategory>(api(src, "get_series_categories"))
+            .map { Category(it.categoryId, it.categoryName, MediaKind.SERIES) }
+
+    /** Catalogue des séries (fiches), sans les épisodes (chargés à la demande). */
+    suspend fun series(src: PlaylistSource.Xtream): List<VodItem> {
+        val names = categoryNames { seriesCategories(src) }
+        return getList<XtSeries>(api(src, "get_series")).map { s ->
+            VodItem(
+                id = "xt:${src.id}:series:${s.seriesId}",
+                name = s.name,
+                posterUrl = s.cover,
+                category = s.categoryId?.let { names[it] ?: it },
+                year = s.year ?: s.releaseDate?.take(4),
+                rating = s.rating,
+                url = "",
+                kind = MediaKind.SERIES,
+                seriesId = s.seriesId.toString(),
+                plot = s.plot,
+            )
+        }
+    }
+
+    /** Fiche d'une série : saisons et épisodes prêts à lire. */
+    suspend fun seriesInfo(src: PlaylistSource.Xtream, seriesId: String, fallbackName: String): SeriesDetail {
+        val r = getOne<XtSeriesInfo>(api(src, "get_series_info", "&series_id=$seriesId"))
+        val seasons = LinkedHashMap<Int, MutableList<Episode>>()
+
+        fun addEpisode(el: JsonElement, seasonHint: Int?) {
+            val o = el as? JsonObject ?: return
+            val id = o.str("id") ?: return
+            val season = o.int("season") ?: seasonHint ?: 1
+            val number = o.int("episode_num") ?: (seasons[season]?.size?.plus(1) ?: 1)
+            val info = o["info"] as? JsonObject
+            seasons.getOrPut(season) { ArrayList() }.add(Episode(
+                id = "xt:${src.id}:ep:$id",
+                title = o.str("title")?.takeIf { it.isNotBlank() } ?: "Épisode $number",
+                season = season,
+                number = number,
+                url = episodeUrl(src, id, o.str("container_extension")),
+                plot = info?.str("plot"),
+                imageUrl = info?.str("movie_image") ?: r.info?.cover,
+                durationSecs = info?.int("duration_secs"),
+            ))
+        }
+
+        when (val eps = r.episodes) {
+            is JsonObject -> eps.forEach { (key, value) ->
+                val hint = key.toIntOrNull()
+                (value as? JsonArray)?.forEach { addEpisode(it, hint) }
+            }
+            is JsonArray -> eps.forEach { entry ->
+                when (entry) {
+                    is JsonArray -> entry.forEach { addEpisode(it, null) }
+                    else -> addEpisode(entry, null)
+                }
+            }
+            else -> Unit
+        }
+
+        return SeriesDetail(
+            name = r.info?.name?.takeIf { it.isNotBlank() } ?: fallbackName,
+            plot = r.info?.plot,
+            coverUrl = r.info?.cover,
+            seasons = seasons.mapValues { (_, v) -> v.sortedBy { it.number } },
+        )
+    }
+
+    // Accès tolérant aux primitives JSON (chaîne ou nombre, selon les panneaux).
+    private fun JsonObject.str(key: String): String? =
+        (this[key] as? JsonPrimitive)?.content?.takeIf { it != "null" }
+
+    private fun JsonObject.int(key: String): Int? = str(key)?.toDoubleOrNull()?.toInt()
 
     /** EPG court (now/next…) pour une chaîne. Les titres/description sont en Base64. */
     suspend fun shortEpg(src: PlaylistSource.Xtream, streamId: String, limit: Int = 8): List<EpgProgram> {

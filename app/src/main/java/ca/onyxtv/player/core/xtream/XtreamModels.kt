@@ -56,6 +56,36 @@ data class XtVodStream(
 )
 
 @Serializable
+data class XtSeries(
+    @SerialName("num") val num: Int? = null,
+    @SerialName("name") val name: String = "",
+    @SerialName("series_id") val seriesId: Long = 0,
+    @SerialName("cover") val cover: String? = null,
+    @SerialName("plot") val plot: String? = null,
+    @SerialName("category_id") val categoryId: String? = null,
+    @SerialName("rating") val rating: String? = null,
+    @SerialName("year") val year: String? = null,
+    @SerialName("releaseDate") val releaseDate: String? = null,
+)
+
+/**
+ * Réponse de get_series_info. `episodes` varie selon les panneaux (objet {"1": [...]} ou
+ * tableau de tableaux) : on le garde brut (JsonElement) et on l'interprète côté client.
+ */
+@Serializable
+data class XtSeriesInfo(
+    @SerialName("info") val info: XtSeriesInfoBlock? = null,
+    @SerialName("episodes") val episodes: kotlinx.serialization.json.JsonElement? = null,
+)
+
+@Serializable
+data class XtSeriesInfoBlock(
+    @SerialName("name") val name: String? = null,
+    @SerialName("cover") val cover: String? = null,
+    @SerialName("plot") val plot: String? = null,
+)
+
+@Serializable
 data class XtShortEpg(
     @SerialName("epg_listings") val listings: List<XtEpgItem> = emptyList(),
 )

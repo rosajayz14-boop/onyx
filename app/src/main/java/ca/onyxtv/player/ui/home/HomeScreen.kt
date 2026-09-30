@@ -29,6 +29,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.tv.material3.Button
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
+import ca.onyxtv.player.core.model.MediaKind
+import ca.onyxtv.player.core.model.VodItem
 import ca.onyxtv.player.player.PlayTarget
 import ca.onyxtv.player.ui.components.EmptyState
 import ca.onyxtv.player.ui.components.ErrorBanner
@@ -46,7 +48,10 @@ fun HomeScreen(
     vm: OnyxViewModel,
     onPlay: (PlayTarget) -> Unit,
     onGoLive: () -> Unit,
+    onOpenSeries: (VodItem) -> Unit,
 ) {
+    // Une série s'ouvre sur sa fiche (saisons/épisodes) ; un film se lit directement.
+    val openVod: (VodItem) -> Unit = { v -> if (v.kind == MediaKind.SERIES) onOpenSeries(v) else onPlay(v.toPlayTarget()) }
     val state by vm.state.collectAsStateWithLifecycle()
     val favorites by vm.favorites.collectAsStateWithLifecycle()
     val recents by vm.recents.collectAsStateWithLifecycle()
@@ -88,7 +93,13 @@ fun HomeScreen(
         else -> "Vos chaînes en direct, prêtes à zapper."
     }
     val heroImage = heroResume?.imageUrl ?: heroVod?.posterUrl
-    val heroTarget: PlayTarget? = heroResume?.toPlayTarget() ?: heroVod?.toPlayTarget() ?: channels.firstOrNull()?.toPlayTarget()
+    val heroAction: () -> Unit = {
+        when {
+            heroResume != null -> onPlay(heroResume.toPlayTarget())
+            heroVod != null -> openVod(heroVod)
+            else -> channels.firstOrNull()?.let { onPlay(it.toPlayTarget()) }
+        }
+    }
 
     LazyColumn(
         modifier = Modifier
@@ -105,7 +116,7 @@ fun HomeScreen(
                 title = heroTitle,
                 hint = heroHint,
                 imageUrl = heroImage,
-                onPlay = { heroTarget?.let(onPlay) },
+                onPlay = heroAction,
                 onLive = onGoLive,
             )
         }
@@ -152,7 +163,7 @@ fun HomeScreen(
                             width = 130.dp,
                             aspectRatio = 2f / 3f,
                             initials = v.name.take(1).uppercase(),
-                            onClick = { onPlay(v.toPlayTarget()) },
+                            onClick = { openVod(v) },
                         )
                     }
                 }
@@ -186,7 +197,7 @@ fun HomeScreen(
                             width = 130.dp,
                             aspectRatio = 2f / 3f,
                             initials = v.name.take(1).uppercase(),
-                            onClick = { onPlay(v.toPlayTarget()) },
+                            onClick = { openVod(v) },
                         )
                     }
                 }
@@ -204,7 +215,7 @@ fun HomeScreen(
                             width = 130.dp,
                             aspectRatio = 2f / 3f,
                             initials = v.name.take(1).uppercase(),
-                            onClick = { onPlay(v.toPlayTarget()) },
+                            onClick = { openVod(v) },
                         )
                     }
                 }

@@ -25,6 +25,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.tv.material3.Button
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
+import ca.onyxtv.player.core.model.MediaKind
+import ca.onyxtv.player.core.model.VodItem
 import ca.onyxtv.player.player.PlayTarget
 import ca.onyxtv.player.ui.components.EmptyState
 import ca.onyxtv.player.ui.components.LoadingState
@@ -35,7 +37,11 @@ import ca.onyxtv.player.ui.theme.OnyxMuted
 import ca.onyxtv.player.viewmodel.OnyxViewModel
 
 @Composable
-fun VodScreen(vm: OnyxViewModel, onPlay: (PlayTarget) -> Unit) {
+fun VodScreen(
+    vm: OnyxViewModel,
+    onPlay: (PlayTarget) -> Unit,
+    onOpenSeries: (VodItem) -> Unit,
+) {
     val state by vm.state.collectAsStateWithLifecycle()
     val favorites by vm.favorites.collectAsStateWithLifecycle()
     val recents by vm.recents.collectAsStateWithLifecycle()
@@ -53,10 +59,14 @@ fun VodScreen(vm: OnyxViewModel, onPlay: (PlayTarget) -> Unit) {
         return
     }
 
-    val categories = remember(vod) { vod.mapNotNull { it.category }.distinct() }
-    var category by remember { mutableStateOf<String?>(null) }
-    val shown = remember(vod, category) { if (category == null) vod else vod.filter { it.category == category } }
+    var kind by remember { mutableStateOf(MediaKind.MOVIE) }
+    val ofKind = remember(vod, kind) { vod.filter { it.kind == kind } }
+    val categories = remember(ofKind) { ofKind.mapNotNull { it.category }.distinct() }
+    var category by remember(kind) { mutableStateOf<String?>(null) }
+    val shown = remember(ofKind, category) { if (category == null) ofKind else ofKind.filter { it.category == category } }
     val progressById = remember(recents) { recents.filter { it.resumable }.associate { it.id to it.progress } }
+    val movieCount = remember(vod) { vod.count { it.kind == MediaKind.MOVIE } }
+    val seriesCount = remember(vod) { vod.count { it.kind == MediaKind.SERIES } }
 
     Column(Modifier.fillMaxSize().padding(horizontal = 28.dp)) {
         Row(
@@ -64,7 +74,11 @@ fun VodScreen(vm: OnyxViewModel, onPlay: (PlayTarget) -> Unit) {
             horizontalArrangement = Arrangement.SpaceBetween,
             modifier = Modifier.fillMaxWidth().padding(top = 24.dp, bottom = 8.dp),
         ) {
-            Text("Films & Séries", style = MaterialTheme.typography.headlineLarge)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("Films & Séries", style = MaterialTheme.typography.headlineLarge)
+                CategoryChip("Films ($movieCount)", kind == MediaKind.MOVIE) { kind = MediaKind.MOVIE }
+                CategoryChip("Séries ($seriesCount)", kind == MediaKind.SERIES) { kind = MediaKind.SERIES }
+            }
             Text("${shown.size} titres", color = OnyxMuted, style = MaterialTheme.typography.bodyLarge)
         }
 
@@ -74,6 +88,14 @@ fun VodScreen(vm: OnyxViewModel, onPlay: (PlayTarget) -> Unit) {
         ) {
             item { CategoryChip("Toutes", category == null) { category = null } }
             items(categories, key = { it }) { c -> CategoryChip(c, category == c) { category = c } }
+        }
+
+        if (shown.isEmpty()) {
+            EmptyState(
+                title = if (kind == MediaKind.SERIES) "Aucune série" else "Aucun film",
+                hint = "Ce compte ne propose pas ce type de contenu dans cette catégorie.",
+            )
+            return
         }
 
         LazyVerticalGrid(
@@ -93,8 +115,12 @@ fun VodScreen(vm: OnyxViewModel, onPlay: (PlayTarget) -> Unit) {
                     aspectRatio = 2f / 3f,
                     initials = v.name.take(1).uppercase(),
                     progress = progressById[v.id],
-                    badge = if (v.id in favorites) "★" else null,
-                    onClick = { onPlay(v.toPlayTarget()) },
+                    badge = when {
+                        v.id in favorites -> "★"
+                        v.kind == MediaKind.SERIES -> "SÉRIE"
+                        else -> null
+                    },
+                    onClick = { if (v.kind == MediaKind.SERIES) onOpenSeries(v) else onPlay(v.toPlayTarget()) },
                 )
             }
         }

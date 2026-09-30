@@ -23,7 +23,7 @@ data class Channel(
     val kind: MediaKind = MediaKind.LIVE,
 )
 
-/** Un contenu à la demande (film ou série). */
+/** Un contenu à la demande (film ou série). Pour une série, [url] est vide et [seriesId] renseigné. */
 data class VodItem(
     val id: String,
     val name: String,
@@ -33,7 +33,32 @@ data class VodItem(
     val rating: String? = null,
     val url: String,
     val kind: MediaKind = MediaKind.MOVIE,
+    val seriesId: String? = null,
+    val plot: String? = null,
 )
+
+/** Un épisode de série, prêt à lire. */
+data class Episode(
+    val id: String,               // identifiant interne unique (reprise / récents)
+    val title: String,
+    val season: Int,
+    val number: Int,
+    val url: String,
+    val plot: String? = null,
+    val imageUrl: String? = null,
+    val durationSecs: Int? = null,
+)
+
+/** Fiche détaillée d'une série : saisons → épisodes. */
+data class SeriesDetail(
+    val name: String,
+    val plot: String? = null,
+    val coverUrl: String? = null,
+    val seasons: Map<Int, List<Episode>>,
+) {
+    val seasonNumbers: List<Int> get() = seasons.keys.sorted()
+    val episodeCount: Int get() = seasons.values.sumOf { it.size }
+}
 
 /** Un programme du guide (EPG). Horodatage en millisecondes epoch. */
 data class EpgProgram(

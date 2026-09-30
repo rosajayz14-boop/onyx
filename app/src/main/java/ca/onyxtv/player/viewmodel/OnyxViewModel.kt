@@ -154,6 +154,9 @@ class OnyxViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Guide (now/next) pour une chaîne donnée. */
     suspend fun epgFor(channel: Channel) = repo.epg(channel)
+
+    /** Fiche d'une série (saisons/épisodes), chargée à la demande. */
+    suspend fun seriesDetail(item: VodItem) = repo.seriesDetail(item)
 }
 
 /**

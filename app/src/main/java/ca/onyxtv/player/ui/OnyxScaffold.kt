@@ -45,7 +45,9 @@ import ca.onyxtv.player.ui.dvr.DvrScreen
 import ca.onyxtv.player.ui.home.HomeScreen
 import ca.onyxtv.player.ui.live.LiveTvScreen
 import ca.onyxtv.player.ui.mosaic.MosaicScreen
+import ca.onyxtv.player.core.model.VodItem
 import ca.onyxtv.player.ui.search.SearchScreen
+import ca.onyxtv.player.ui.series.SeriesScreen
 import ca.onyxtv.player.ui.settings.SettingsScreen
 import ca.onyxtv.player.ui.theme.OnyxBg
 import ca.onyxtv.player.ui.theme.OnyxBg2
@@ -66,6 +68,7 @@ enum class Dest(val label: String, val icon: ImageVector) {
 fun OnyxRoot(vm: OnyxViewModel = viewModel()) {
     var dest by remember { mutableStateOf(Dest.HOME) }
     var playing by remember { mutableStateOf<PlayTarget?>(null) }
+    var openSeries by remember { mutableStateOf<VodItem?>(null) }
 
     Box(
         Modifier
@@ -117,15 +120,20 @@ fun OnyxRoot(vm: OnyxViewModel = viewModel()) {
         ) {
             Box(Modifier.fillMaxSize()) {
                 when (dest) {
-                    Dest.HOME -> HomeScreen(vm, onPlay = { playing = it }, onGoLive = { dest = Dest.LIVE })
+                    Dest.HOME -> HomeScreen(vm, onPlay = { playing = it }, onGoLive = { dest = Dest.LIVE }, onOpenSeries = { openSeries = it })
                     Dest.LIVE -> LiveTvScreen(vm, onPlay = { playing = it })
-                    Dest.VOD -> VodScreen(vm, onPlay = { playing = it })
+                    Dest.VOD -> VodScreen(vm, onPlay = { playing = it }, onOpenSeries = { openSeries = it })
                     Dest.MOSAIC -> MosaicScreen(vm, onPlay = { playing = it })
                     Dest.DVR -> DvrScreen()
                     Dest.SETTINGS -> SettingsScreen(vm)
-                    Dest.SEARCH -> SearchScreen(vm, onPlay = { playing = it })
+                    Dest.SEARCH -> SearchScreen(vm, onPlay = { playing = it }, onOpenSeries = { openSeries = it })
                 }
             }
+        }
+
+        // Fiche série par-dessus la navigation ; le lecteur reste au-dessus de tout.
+        openSeries?.let { item ->
+            SeriesScreen(vm = vm, item = item, onPlay = { playing = it }, onBack = { openSeries = null })
         }
 
         playing?.let { target ->

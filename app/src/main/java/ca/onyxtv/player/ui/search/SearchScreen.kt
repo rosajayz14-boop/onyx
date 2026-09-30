@@ -21,6 +21,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.tv.material3.Text
+import ca.onyxtv.player.core.model.MediaKind
+import ca.onyxtv.player.core.model.VodItem
 import ca.onyxtv.player.player.PlayTarget
 import ca.onyxtv.player.ui.components.MediaCard
 import ca.onyxtv.player.ui.components.toPlayTarget
@@ -32,26 +34,41 @@ private data class SearchHit(
     val subtitle: String?,
     val image: String?,
     val seed: String,
-    val target: PlayTarget,
     val initials: String,
+    val aspect: Float,
+    val badge: String?,
+    val target: PlayTarget?,
+    val series: VodItem?,
 )
 
 @Composable
-fun SearchScreen(vm: OnyxViewModel, onPlay: (PlayTarget) -> Unit) {
+fun SearchScreen(
+    vm: OnyxViewModel,
+    onPlay: (PlayTarget) -> Unit,
+    onOpenSeries: (VodItem) -> Unit,
+) {
     val state by vm.state.collectAsStateWithLifecycle()
     var query by remember { mutableStateOf("") }
 
     val results = remember(query, state) {
         val q = query.trim().lowercase()
-        if (q.isEmpty()) emptyList()
+        if (q.length < 2) emptyList()
         else buildList {
             state.channels.forEach {
-                add(SearchHit(it.name, it.groupTitle, it.logoUrl, it.id, it.toPlayTarget(), it.name.take(2).uppercase()))
+                add(SearchHit(it.name, it.groupTitle, it.logoUrl, it.id, it.name.take(2).uppercase(), 16f / 9f, "DIRECT", it.toPlayTarget(), null))
             }
             state.vod.forEach {
-                add(SearchHit(it.name, it.category ?: it.year, it.posterUrl, it.id, it.toPlayTarget(), it.name.take(1).uppercase()))
+                val isSeries = it.kind == MediaKind.SERIES
+                add(
+                    SearchHit(
+                        it.name, it.category ?: it.year, it.posterUrl, it.id, it.name.take(1).uppercase(), 2f / 3f,
+                        if (isSeries) "SÉRIE" else null,
+                        if (isSeries) null else it.toPlayTarget(),
+                        if (isSeries) it else null,
+                    )
+                )
             }
-        }.filter { it.title.lowercase().contains(q) }.take(60)
+        }.filter { it.title.lowercase().contains(q) }.take(80)
     }
 
     Column(Modifier.fillMaxSize().padding(horizontal = 36.dp, vertical = 28.dp)) {
@@ -67,29 +84,36 @@ fun SearchScreen(vm: OnyxViewModel, onPlay: (PlayTarget) -> Unit) {
 
         if (results.isEmpty()) {
             Text(
-                if (query.isBlank()) "Tapez pour rechercher dans vos chaînes et contenus."
-                else "Aucun résultat pour « $query ».",
+                when {
+                    query.isBlank() -> "Tapez pour rechercher dans vos chaînes et contenus."
+                    query.trim().length < 2 -> "Tapez au moins 2 caractères."
+                    else -> "Aucun résultat pour « $query »."
+                },
                 color = OnyxMuted,
                 modifier = Modifier.padding(top = 20.dp),
             )
         } else {
+            Text("${results.size} résultat${if (results.size > 1) "s" else ""}", color = OnyxMuted, modifier = Modifier.padding(top = 12.dp))
             LazyVerticalGrid(
                 columns = GridCells.Adaptive(150.dp),
-                modifier = Modifier.fillMaxSize().padding(top = 16.dp),
+                modifier = Modifier.fillMaxSize().padding(top = 8.dp),
                 horizontalArrangement = Arrangement.spacedBy(16.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp),
                 contentPadding = PaddingValues(bottom = 20.dp),
             ) {
-                items(results) { hit ->
+                items(results, key = { it.seed }) { hit ->
                     MediaCard(
                         title = hit.title,
                         subtitle = hit.subtitle,
                         imageUrl = hit.image,
                         seed = hit.seed,
                         width = 150.dp,
-                        aspectRatio = 16f / 9f,
+                        aspectRatio = hit.aspect,
                         initials = hit.initials,
-                        onClick = { onPlay(hit.target) },
+                        badge = hit.badge,
+                        onClick = {
+                            hit.series?.let(onOpenSeries) ?: hit.target?.let(onPlay)
+                        },
                     )
                 }
             }
