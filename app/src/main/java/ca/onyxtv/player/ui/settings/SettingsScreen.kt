@@ -269,8 +269,8 @@ private fun AddXtreamCard(vm: OnyxViewModel) {
     FormCard("Ajouter un compte Xtream Codes") {
         Field("Nom", label, onFocus = { active = "Nom" }) { label = it }
         Field("Serveur (http://exemple.tv:8080)", server, KeyboardType.Uri, onFocus = { active = "Serveur" }) { server = it }
-        Field("Nom d'utilisateur", user, KeyboardType.VisiblePassword, onFocus = { active = "Utilisateur" }) { user = it }
-        Field("Mot de passe", pass, KeyboardType.VisiblePassword, onFocus = { active = "Mot de passe" }) { pass = it }
+        Field("Nom d'utilisateur", user, KeyboardType.Ascii, onFocus = { active = "Utilisateur" }) { user = it }
+        Field("Mot de passe", pass, KeyboardType.Ascii, onFocus = { active = "Mot de passe" }) { pass = it }
         QuickKeys(
             target = active,
             onKey = { k ->
