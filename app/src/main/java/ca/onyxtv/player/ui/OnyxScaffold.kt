@@ -68,6 +68,7 @@ import ca.onyxtv.player.ui.movie.MovieScreen
 import ca.onyxtv.player.ui.search.SearchScreen
 import ca.onyxtv.player.ui.series.SeriesScreen
 import ca.onyxtv.player.ui.settings.SettingsScreen
+import ca.onyxtv.player.ui.vod.VodScreen
 import ca.onyxtv.player.ui.theme.OnyxBg
 import ca.onyxtv.player.ui.theme.OnyxBg2
 import ca.onyxtv.player.ui.theme.OnyxCyan
@@ -169,7 +170,7 @@ fun OnyxRoot(vm: OnyxViewModel = viewModel()) {
             openDetail != null -> runCatching { detailFocus.requestFocus() }
             else -> {
                 // On vise le contenu ; s'il n'a encore rien de focalisable (chargement), le menu.
-                if (!runCatching { contentFocus.requestFocus() }.getOrDefault(false)) {
+                if (!runCatching { contentFocus.requestFocus() }.isSuccess) {
                     runCatching { railFocus.requestFocus() }
                 }
             }
@@ -195,7 +196,7 @@ fun OnyxRoot(vm: OnyxViewModel = viewModel()) {
             if (contentHasFocus) return@LaunchedEffect
             if (FocusBridge.nativeViewHasFocus()) return@LaunchedEffect
             delay(if (i == 0) 200 else 120)
-            val gotContent = runCatching { contentFocus.requestFocus() }.getOrDefault(false)
+            val gotContent = runCatching { contentFocus.requestFocus() }.isSuccess
             if (gotContent || contentHasFocus) return@LaunchedEffect
         }
         // Repli : au moins le menu a le focus, la navigation reste possible.
