@@ -43,7 +43,14 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.input.InputMode
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalInputModeManager
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
@@ -154,10 +161,10 @@ fun OnyxRoot(vm: OnyxViewModel = viewModel()) {
     // Le tv-material NavigationDrawer, qui piégeait le focus (flèches sans effet, menu bloqué),
     // n'est plus utilisé.
     val railFocus = remember { FocusRequester() }
-    val contentFocus = remember { FocusRequester() }
     val detailFocus = remember { FocusRequester() }
     val playerFocus = remember { FocusRequester() }
     val inputModeManager = LocalInputModeManager.current
+    val focusManager = LocalFocusManager.current
     var railHasFocus by remember { mutableStateOf(false) }
     var contentHasFocus by remember { mutableStateOf(false) }
     var rootHasFocus by remember { mutableStateOf(false) }
@@ -168,12 +175,7 @@ fun OnyxRoot(vm: OnyxViewModel = viewModel()) {
         when {
             playing != null -> runCatching { playerFocus.requestFocus() }
             openDetail != null -> runCatching { detailFocus.requestFocus() }
-            else -> {
-                // On vise le contenu ; s'il n'a encore rien de focalisable (chargement), le menu.
-                if (!runCatching { contentFocus.requestFocus() }.isSuccess) {
-                    runCatching { railFocus.requestFocus() }
-                }
-            }
+            else -> runCatching { railFocus.requestFocus() }
         }
     }
     SideEffect { FocusBridge.requestFocus = requestCurrentFocus }
@@ -187,20 +189,19 @@ fun OnyxRoot(vm: OnyxViewModel = viewModel()) {
 
     // Reprise du focus dès que rien n'est sélectionné (démarrage, fin du chargement, fermeture
     // d'une fiche/du lecteur, changement de page). On vise le contenu, avec repli sur le menu.
-    LaunchedEffect(dest, overlayOpen, state.loading, state.hasContent, rootHasFocus) {
+    LaunchedEffect(dest, overlayOpen, state.loading, state.hasContent) {
         if (overlayOpen) {
             requestCurrentFocus()
             return@LaunchedEffect
         }
+        // Au démarrage / après fermeture d'une superposition : placer le focus sur le menu
+        // (toujours focalisable). L'utilisateur entre dans le contenu avec la flèche droite.
         repeat(15) { i ->
-            if (contentHasFocus) return@LaunchedEffect
-            if (FocusBridge.nativeViewHasFocus()) return@LaunchedEffect
-            delay(if (i == 0) 200 else 120)
-            val gotContent = runCatching { contentFocus.requestFocus() }.isSuccess
-            if (gotContent || contentHasFocus) return@LaunchedEffect
+            if (rootHasFocus || FocusBridge.nativeViewHasFocus()) return@LaunchedEffect
+            delay(if (i == 0) 150 else 120)
+            runCatching { railFocus.requestFocus() }
+            if (FocusBridge.hasFocus) return@LaunchedEffect
         }
-        // Repli : au moins le menu a le focus, la navigation reste possible.
-        if (!FocusBridge.hasFocus && !FocusBridge.nativeViewHasFocus()) runCatching { railFocus.requestFocus() }
     }
 
     val railWidth by animateDpAsState(if (railHasFocus) 232.dp else 84.dp, label = "rail")
@@ -223,8 +224,14 @@ fun OnyxRoot(vm: OnyxViewModel = viewModel()) {
                     .background(OnyxBg2)
                     .onFocusChanged { railHasFocus = it.hasFocus }
                     .focusRequester(railFocus)
-                    .focusGroup()
                     .focusProperties { canFocus = !overlayOpen }
+                    .focusGroup()
+                    .onPreviewKeyEvent { ev ->
+                        // Flèche droite depuis le menu : entrer dans le contenu.
+                        if (ev.type == KeyEventType.KeyDown && ev.key == Key.DirectionRight)
+                            focusManager.moveFocus(FocusDirection.Right)
+                        else false
+                    }
                     .padding(vertical = 16.dp, horizontal = 10.dp),
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
@@ -259,9 +266,6 @@ fun OnyxRoot(vm: OnyxViewModel = viewModel()) {
                     .weight(1f)
                     .fillMaxHeight()
                     .onFocusChanged { contentHasFocus = it.hasFocus }
-                    .focusRequester(contentFocus)
-                    .focusGroup()
-                    .focusProperties { canFocus = !overlayOpen }
             ) {
                 when (dest) {
                     Dest.HOME -> HomeScreen(vm, onPlay = { playing = it }, onGoLive = { dest = Dest.LIVE }, onGoSettings = { dest = Dest.SETTINGS }, onOpenDetail = { openDetail = it })
