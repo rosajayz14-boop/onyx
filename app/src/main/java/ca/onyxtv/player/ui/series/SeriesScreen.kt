@@ -22,6 +22,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -29,6 +30,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -55,6 +57,8 @@ fun SeriesScreen(
     item: VodItem,
     onPlay: (PlayTarget) -> Unit,
     onBack: () -> Unit,
+    /** false tant que le lecteur est ouvert par-dessus : à son retour (true), on refocalise. */
+    active: Boolean = true,
 ) {
     val recents by vm.recents.collectAsStateWithLifecycle()
     val favorites by vm.favorites.collectAsStateWithLifecycle()
@@ -90,6 +94,7 @@ fun SeriesScreen(
                 lastWatchedId = recents.firstOrNull { r -> detail.seasons.values.any { eps -> eps.any { it.id == r.id } } }?.id,
                 onPlay = onPlay,
                 onBack = onBack,
+                active = active,
             )
         }
     }
@@ -107,6 +112,7 @@ private fun SeriesContent(
     lastWatchedId: String?,
     onPlay: (PlayTarget) -> Unit,
     onBack: () -> Unit,
+    active: Boolean,
 ) {
     val seasons = detail.seasonNumbers
     // Tous les épisodes dans l'ordre de visionnage (saison puis numéro).
@@ -124,8 +130,15 @@ private fun SeriesContent(
 
     var season by remember(detail) { mutableIntStateOf(nextUp?.season ?: seasons.first()) }
     val playFocus = remember { androidx.compose.ui.focus.FocusRequester() }
-    androidx.compose.runtime.LaunchedEffect(detail) {
-        repeat(3) { kotlinx.coroutines.delay(100); if (runCatching { playFocus.requestFocus() }.isSuccess) return@LaunchedEffect }
+    var playFocused by remember { mutableStateOf(false) }
+    androidx.compose.runtime.LaunchedEffect(detail, active) {
+        if (!active) return@LaunchedEffect
+        repeat(12) {
+            androidx.compose.runtime.withFrameNanos { }
+            if (playFocused) return@LaunchedEffect
+            runCatching { playFocus.requestFocus() }
+            kotlinx.coroutines.delay(80)
+        }
     }
     val episodes = detail.seasons[season].orEmpty()
 
@@ -186,7 +199,7 @@ private fun SeriesContent(
 
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(vertical = 14.dp)) {
                 nextUp?.let { ep ->
-                    Button(onClick = { onPlay(target(ep)) }, modifier = Modifier.focusRequester(playFocus)) {
+                    Button(onClick = { onPlay(target(ep)) }, modifier = Modifier.focusRequester(playFocus).onFocusChanged { playFocused = it.isFocused }) {
                         Text(
                             when (nextUpMode) {
                                 "resume" -> "▶ Reprendre S${ep.season}E${ep.number} · ${ep.title} (${((progressById[ep.id] ?: 0f) * 100).toInt()} %)"

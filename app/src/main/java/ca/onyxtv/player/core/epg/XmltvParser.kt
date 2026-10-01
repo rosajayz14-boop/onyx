@@ -25,9 +25,14 @@ object XmltvParser {
      */
     fun parse(input: InputStream, fromMs: Long = Long.MIN_VALUE, toMs: Long = Long.MAX_VALUE): List<EpgProgram> {
         val out = ArrayList<EpgProgram>()
+        // Guides .xml.gz (très courant pour les EPG de listes M3U) : détection par la signature gzip.
+        val buffered = java.io.BufferedInputStream(input, 64 * 1024).apply { mark(2) }
+        val b1 = buffered.read(); val b2 = buffered.read()
+        buffered.reset()
+        val src: InputStream = if (b1 == 0x1f && b2 == 0x8b) java.util.zip.GZIPInputStream(buffered) else buffered
         val parser = Xml.newPullParser()
         parser.setFeature(XmlPullParser.FEATURE_PROCESS_NAMESPACES, false)
-        parser.setInput(input, null)
+        parser.setInput(src, null)
 
         var event = parser.eventType
         var channel: String? = null
@@ -38,7 +43,7 @@ object XmltvParser {
         var inProgramme = false
         var current: String? = null
 
-        while (event != XmlPullParser.END_DOCUMENT) {
+        try { while (event != XmlPullParser.END_DOCUMENT) {
             when (event) {
                 XmlPullParser.START_TAG -> when (parser.name) {
                     "programme" -> {
@@ -75,6 +80,8 @@ object XmltvParser {
                 }
             }
             event = parser.next()
+        } } catch (e: Exception) {
+            // Guide tronqué ou balise mal formée : on garde les programmes déjà lus.
         }
         return out
     }

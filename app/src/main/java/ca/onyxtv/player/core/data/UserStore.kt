@@ -61,6 +61,8 @@ data class AppPrefs(
     val seekForwardSeconds: Int = 30,
     /** Affiche un cadre de diagnostic (touches reçues, focus) pour le dépannage. */
     val diagnostics: Boolean = false,
+    /** Commit de la mise à jour écartée par « Plus tard » (l'écran plein ne revient pas pour ce build). */
+    val dismissedUpdateCommit: String = "",
 )
 
 /**
@@ -116,9 +118,17 @@ class UserStore(private val context: Context) {
 
     /** Ajoute/met à jour un récent (par id) et conserve les [MAX_RECENTS] plus récents. */
     suspend fun recordRecent(item: RecentItem) {
-        val current = recents.first().filterNot { it.id == item.id }
-        val next = (listOf(item.copy(updatedAt = System.currentTimeMillis())) + current).take(MAX_RECENTS)
-        context.userDataStore.edit { it[recentKey] = json.encodeToString(recentSer, next) }
+        // Lecture-modification-écriture DANS la transaction (évite de perdre une écriture
+        // concurrente : progression toutes les 5 s + favoris + sortie du lecteur).
+        context.userDataStore.edit { p ->
+            val current = runCatching { p[recentKey]?.let { json.decodeFromString(recentSer, it) } }.getOrNull().orEmpty()
+                .filterNot { it.id == item.id }
+            val all = listOf(item.copy(updatedAt = System.currentTimeMillis())) + current
+            // Plafonds SÉPARÉS : le zapping (direct) n'efface plus les points de reprise (films/séries).
+            val (live, vod) = all.partition { it.live }
+            val next = (live.take(MAX_RECENTS_LIVE) + vod.take(MAX_RECENTS_VOD)).sortedByDescending { it.updatedAt }
+            p[recentKey] = json.encodeToString(recentSer, next)
+        }
     }
 
     suspend fun removeRecent(id: String) {
@@ -126,5 +136,5 @@ class UserStore(private val context: Context) {
         context.userDataStore.edit { it[recentKey] = json.encodeToString(recentSer, next) }
     }
 
-    private companion object { const val MAX_RECENTS = 30 }
+    private companion object { const val MAX_RECENTS_LIVE = 20; const val MAX_RECENTS_VOD = 60 }
 }

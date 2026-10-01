@@ -16,7 +16,7 @@ private val OnyxColorScheme = darkColorScheme(
     onSurface = OnyxText,
     surfaceVariant = OnyxSurfaceHi,
     onSurfaceVariant = OnyxMuted,
-    border = Color(0x1FFFFFFF),
+    border = OnyxCyan,   // bordure de focus bien visible (avant : 12 % de blanc, invisible)
 )
 
 /** Thème applicatif ONYX (Compose for TV). */

@@ -27,6 +27,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -67,6 +68,8 @@ fun MovieScreen(
     item: VodItem,
     onPlay: (PlayTarget) -> Unit,
     onBack: () -> Unit,
+    /** false tant que le lecteur est ouvert par-dessus : à son retour (true), on refocalise « Lire ». */
+    active: Boolean = true,
 ) {
     val recents by vm.recents.collectAsStateWithLifecycle()
     val favorites by vm.favorites.collectAsStateWithLifecycle()
@@ -76,11 +79,18 @@ fun MovieScreen(
     val playFocus = remember { androidx.compose.ui.focus.FocusRequester() }
     // Bande-annonce : YouTube lu dans l'app (lecteur embarqué) ; lien direct (mp4…) lu par ONYX.
     var trailerId by remember { mutableStateOf<String?>(null) }
-    // Focus sur « Lire » à l'ouverture ET au retour de la bande-annonce (trailerId repasse à null) :
-    // sinon, après fermeture du lecteur YouTube (vue native), la fiche reste sans sélection.
-    androidx.compose.runtime.LaunchedEffect(item.id, trailerId) {
-        if (trailerId != null) return@LaunchedEffect
-        repeat(8) { kotlinx.coroutines.delay(100); if (runCatching { playFocus.requestFocus() }.isSuccess) return@LaunchedEffect }
+    // Focus sur « Lire » à l'ouverture, au retour de la bande-annonce ET au retour du lecteur.
+    // On vérifie le focus RÉEL (onFocusChanged) : requestFocus() renvoie Unit, « isSuccess »
+    // voulait seulement dire « requester attaché », pas « focalisé ».
+    var playFocused by remember { mutableStateOf(false) }
+    androidx.compose.runtime.LaunchedEffect(item.id, trailerId, active) {
+        if (trailerId != null || !active) return@LaunchedEffect
+        repeat(12) {
+            androidx.compose.runtime.withFrameNanos { }
+            if (playFocused) return@LaunchedEffect
+            runCatching { playFocus.requestFocus() }
+            kotlinx.coroutines.delay(80)
+        }
     }
     val recent = recents.firstOrNull { it.id == item.id && it.resumable }
     val seen = recents.any { it.id == item.id && it.finished }
@@ -145,7 +155,7 @@ fun MovieScreen(
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(vertical = 16.dp)) {
                     Button(
                         onClick = { onPlay(recent?.toPlayTarget() ?: item.toPlayTarget()) },
-                        modifier = Modifier.focusRequester(playFocus),
+                        modifier = Modifier.focusRequester(playFocus).onFocusChanged { playFocused = it.isFocused },
                     ) {
                         Text(if (recent != null) "▶ Reprendre (${(recent.progress * 100).toInt()} %)" else "▶ Lire")
                     }

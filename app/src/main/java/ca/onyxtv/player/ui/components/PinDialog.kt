@@ -49,7 +49,7 @@ fun PinDialog(
     var wrong by remember { mutableStateOf(false) }
     val fieldFocus = remember { androidx.compose.ui.focus.FocusRequester() }
     androidx.compose.runtime.LaunchedEffect(Unit) {
-        repeat(3) { kotlinx.coroutines.delay(120); if (runCatching { fieldFocus.requestFocus() }.isSuccess) return@LaunchedEffect }
+        repeat(6) { kotlinx.coroutines.delay(120); runCatching { fieldFocus.requestFocus() } }
     }
 
     BackHandler(enabled = onCancel != null) { onCancel?.invoke() }

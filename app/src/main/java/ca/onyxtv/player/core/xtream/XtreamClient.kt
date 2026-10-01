@@ -171,6 +171,8 @@ class XtreamClient(
     /** Fiche d'une série : saisons et épisodes prêts à lire. */
     suspend fun seriesInfo(src: PlaylistSource.Xtream, seriesId: String, fallbackName: String): SeriesDetail {
         val r = getOne<XtSeriesInfo>(api(src, "get_series_info", "&series_id=$seriesId"))
+        val infoObj = r.info as? JsonObject   // null si le panneau renvoie "info": []
+        val infoCover = infoObj?.str("cover")
         val seasons = LinkedHashMap<Int, MutableList<Episode>>()
 
         fun addEpisode(el: JsonElement, seasonHint: Int?) {
@@ -186,7 +188,7 @@ class XtreamClient(
                 number = number,
                 url = episodeUrl(src, id, o.str("container_extension")),
                 plot = info?.str("plot"),
-                imageUrl = info?.str("movie_image") ?: r.info?.cover,
+                imageUrl = info?.str("movie_image") ?: infoCover,
                 durationSecs = info?.int("duration_secs"),
             ))
         }
@@ -206,9 +208,9 @@ class XtreamClient(
         }
 
         return SeriesDetail(
-            name = r.info?.name?.takeIf { it.isNotBlank() } ?: fallbackName,
-            plot = r.info?.plot,
-            coverUrl = r.info?.cover,
+            name = infoObj?.str("name")?.takeIf { it.isNotBlank() } ?: fallbackName,
+            plot = infoObj?.str("plot"),
+            coverUrl = infoCover,
             seasons = seasons.mapValues { (_, v) -> v.sortedBy { it.number } },
         )
     }

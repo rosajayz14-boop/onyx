@@ -44,7 +44,6 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.focus.FocusDirection
-import androidx.compose.ui.input.InputMode
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
@@ -119,8 +118,8 @@ fun OnyxRoot(vm: OnyxViewModel = viewModel()) {
 
     // Mise à jour disponible : écran dédié (jamais par-dessus le contenu → le focus reste maîtrisé).
     val update by vm.update.collectAsStateWithLifecycle()
-    var dismissedUpdate by remember { mutableStateOf<String?>(null) }
-    val pendingUpdate = update.info?.takeIf { it.commit != dismissedUpdate }
+    val prefs by vm.prefs.collectAsStateWithLifecycle()
+    val pendingUpdate = update.info?.takeIf { it.commit != prefs.dismissedUpdateCommit }
     if (pendingUpdate != null && playing == null && openDetail == null) {
         FocusRoot {
             UpdateScreen(
@@ -129,14 +128,13 @@ fun OnyxRoot(vm: OnyxViewModel = viewModel()) {
                 ready = update.readyFile != null,
                 error = update.error,
                 onInstall = { if (update.readyFile != null) vm.installUpdate() else vm.downloadAndInstallUpdate() },
-                onLater = { dismissedUpdate = pendingUpdate.commit },
+                onLater = { vm.dismissUpdate(pendingUpdate.commit) },
             )
         }
         return
     }
 
     // Reprise automatique de la dernière lecture à l'ouverture (option Réglages → Lecture).
-    val prefs by vm.prefs.collectAsStateWithLifecycle()
     val recents by vm.recents.collectAsStateWithLifecycle()
     val state by vm.state.collectAsStateWithLifecycle()
     var autoResumed by remember { mutableStateOf(false) }
@@ -160,7 +158,6 @@ fun OnyxRoot(vm: OnyxViewModel = viewModel()) {
     // gauche/droite entre eux est gérée par la recherche de focus native de Compose (fiable).
     // Le tv-material NavigationDrawer, qui piégeait le focus (flèches sans effet, menu bloqué),
     // n'est plus utilisé.
-    val railFocus = remember { FocusRequester() }
     val railItemFocus = remember { FocusRequester() }
     var focusNonce by remember { mutableStateOf(0) }
     val detailFocus = remember { FocusRequester() }
@@ -170,17 +167,6 @@ fun OnyxRoot(vm: OnyxViewModel = viewModel()) {
     var railHasFocus by remember { mutableStateOf(false) }
     var contentHasFocus by remember { mutableStateOf(false) }
     val overlayOpen = playing != null || openDetail != null
-
-    // Mode télécommande (non-tactile) : sinon Android ignore les flèches et n'affiche pas la
-    // sélection tant qu'on n'a pas appuyé sur OK. On insiste (réessais) le temps que des éléments
-    // focalisables soient composés, puis on garde le mode à chaque changement d'écran.
-    LaunchedEffect(dest, overlayOpen) {
-        repeat(40) {
-            val ok = runCatching { inputModeManager.requestInputMode(InputMode.Keyboard) }.getOrDefault(false)
-            if (ok || inputModeManager.inputMode == InputMode.Keyboard) return@LaunchedEffect
-            delay(150)
-        }
-    }
 
     // Reprise du focus dès que rien n'est sélectionné (démarrage, fin du chargement, fermeture
     // d'une fiche/du lecteur, changement de page). On vise le contenu, avec repli sur le menu.
@@ -207,12 +193,9 @@ fun OnyxRoot(vm: OnyxViewModel = viewModel()) {
     // ce qui est souvent un état périmé juste après l'appui sur Retour).
     LaunchedEffect(focusNonce) {
         if (focusNonce == 0 || overlayOpen) return@LaunchedEffect
-        delay(60)
-        repeat(20) {
-            if (railHasFocus) return@LaunchedEffect
-            runCatching { railItemFocus.requestFocus() }
-            delay(90)
-        }
+        // Laisser le changement de page / déplacement du requester s'appliquer, puis UNE demande.
+        androidx.compose.runtime.withFrameNanos { }
+        runCatching { railItemFocus.requestFocus() }
     }
 
     // Retour : depuis le contenu -> revenir au menu (évite de perdre le focus) ; depuis le menu
@@ -239,8 +222,12 @@ fun OnyxRoot(vm: OnyxViewModel = viewModel()) {
                     .fillMaxHeight()
                     .background(OnyxBg2)
                     .onFocusChanged { railHasFocus = it.hasFocus }
-                    .focusRequester(railFocus)
-                    .focusProperties { canFocus = !overlayOpen }
+                    // IMPORTANT : pas de focusProperties { canFocus } à l'extérieur du groupe. Une
+                    // propriété externe écrase le canFocus=false du groupe et rend la Column elle-même
+                    // focalisable (invisible) : après Retour, le focus s'y garait, les flèches ne
+                    // trouvaient rien et seul OK (= entrer dans les enfants) réveillait un élément.
+                    // Pendant une superposition on bloque l'ENTRÉE dans le menu, sans toucher à canFocus.
+                    .focusProperties { enter = { if (overlayOpen) FocusRequester.Cancel else FocusRequester.Default } }
                     .focusGroup()
                     .onPreviewKeyEvent { ev ->
                         // Flèche droite depuis le menu : entrer dans le contenu.
@@ -299,7 +286,8 @@ fun OnyxRoot(vm: OnyxViewModel = viewModel()) {
                     Dest.LIVE -> LiveTvScreen(vm, onPlay = { playing = it })
                     Dest.GUIDE -> GuideScreen(vm, onPlay = { playing = it })
                     Dest.VOD -> VodScreen(vm, onPlay = { playing = it }, onOpenDetail = { openDetail = it })
-                    Dest.MOSAIC -> MosaicScreen(vm, onPlay = { playing = it })
+                    // Pas de 4 lecteurs qui tournent sous le lecteur plein écran (décodeurs/connexions).
+                    Dest.MOSAIC -> if (playing == null) MosaicScreen(vm, onPlay = { playing = it }) else Box(Modifier.fillMaxSize())
                     Dest.DVR -> DvrScreen(vm, onPlay = { playing = it })
                     Dest.SETTINGS -> SettingsScreen(vm)
                     Dest.SEARCH -> SearchScreen(vm, onPlay = { playing = it }, onOpenDetail = { openDetail = it })
@@ -326,15 +314,16 @@ fun OnyxRoot(vm: OnyxViewModel = viewModel()) {
                 Modifier
                     .fillMaxSize()
                     .focusRequester(detailFocus)
-                    .focusProperties { exit = { FocusRequester.Cancel } }
+                    // Piège le focus dans la fiche SEULEMENT quand le lecteur n'est pas ouvert ;
+                    // sinon le piège annulait la demande de focus du lecteur (lecteur « sourd »).
+                    .focusProperties { exit = { if (playing == null) FocusRequester.Cancel else FocusRequester.Default } }
                     .focusGroup()
             ) {
-                Box(Modifier.fillMaxSize().focusProperties { canFocus = playing == null }) {
-                    if (item.kind == MediaKind.SERIES)
-                        SeriesScreen(vm = vm, item = item, onPlay = { playing = it }, onBack = { openDetail = null })
-                    else
-                        MovieScreen(vm = vm, item = item, onPlay = { playing = it }, onBack = { openDetail = null })
-                }
+                val active = playing == null
+                if (item.kind == MediaKind.SERIES)
+                    SeriesScreen(vm = vm, item = item, onPlay = { playing = it }, onBack = { openDetail = null }, active = active)
+                else
+                    MovieScreen(vm = vm, item = item, onPlay = { playing = it }, onBack = { openDetail = null }, active = active)
             }
         }
 
@@ -404,15 +393,7 @@ private fun RailItem(
 @Composable
 private fun FocusRoot(content: @Composable BoxScope.() -> Unit) {
     val root = remember { FocusRequester() }
-    val inputModeManager = LocalInputModeManager.current
     var hasFocus by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) {
-        repeat(40) {
-            val ok = runCatching { inputModeManager.requestInputMode(InputMode.Keyboard) }.getOrDefault(false)
-            if (ok || inputModeManager.inputMode == InputMode.Keyboard) return@LaunchedEffect
-            delay(150)
-        }
-    }
     LaunchedEffect(hasFocus) {
         if (hasFocus) return@LaunchedEffect
         repeat(20) {

@@ -47,6 +47,11 @@ object UpdateChecker {
         val notes = (root["body"] as? JsonPrimitive)?.content.orEmpty()
         val commit = commitRegex.find(notes)?.groupValues?.get(1) ?: return null
         if (commit.startsWith(currentCommit) || currentCommit.startsWith(commit)) return null
+        // Ne proposer QUE les builds plus récents (le titre contient « build N », N = versionCode) :
+        // sinon une publication plus ancienne serait proposée comme « mise à jour » (rétrogradation).
+        val name = (root["name"] as? JsonPrimitive)?.content.orEmpty()
+        val remoteBuild = Regex("build (\\d+)").find(name)?.groupValues?.get(1)?.toIntOrNull()
+        if (remoteBuild != null && remoteBuild <= BuildConfig.VERSION_CODE) return null
         val asset = (root["assets"] as? JsonArray)?.firstOrNull() as? JsonObject
         return UpdateInfo(
             label = (root["name"] as? JsonPrimitive)?.content ?: "Nouvelle version",

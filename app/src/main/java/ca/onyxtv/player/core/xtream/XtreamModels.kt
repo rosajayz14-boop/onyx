@@ -76,7 +76,9 @@ data class XtSeries(
  */
 @Serializable
 data class XtSeriesInfo(
-    @SerialName("info") val info: XtSeriesInfoBlock? = null,
+    // "info" est un objet sur la plupart des panneaux mais un tableau vide [] sur d'autres :
+    // on le garde brut et on le lit de façon tolérante.
+    @SerialName("info") val info: kotlinx.serialization.json.JsonElement? = null,
     @SerialName("episodes") val episodes: kotlinx.serialization.json.JsonElement? = null,
 )
 

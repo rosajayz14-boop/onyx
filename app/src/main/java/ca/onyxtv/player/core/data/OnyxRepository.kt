@@ -177,7 +177,10 @@ class OnyxRepository(
         }
         // Ne JAMAIS mettre en cache un résultat vide : au démarrage le réseau peut ne pas être
         // prêt, et un vide caché 30 min laisserait le guide désespérément vide.
-        if (result.isNotEmpty()) synchronized(epgByChannel) { epgByChannel[channel.id] = Cached(now, result) }
+        // Résultat vide : cache COURT (5 min) pour ne pas marteler le serveur à chaque rendu,
+        // mais jamais 30 min (un vide au démarrage ne doit pas figer le guide).
+        val at = if (result.isNotEmpty()) now else now - EPG_TTL_MS + 5 * 60_000L
+        synchronized(epgByChannel) { epgByChannel[channel.id] = Cached(at, result) }
         return result
     }
 

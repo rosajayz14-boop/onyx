@@ -66,6 +66,7 @@ import ca.onyxtv.player.ui.theme.OnyxLive
 import ca.onyxtv.player.ui.theme.OnyxMuted
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 
 /** Cible de lecture : ce que l'on ouvre en plein écran. */
 data class PlayTarget(
@@ -137,7 +138,30 @@ fun PlayerScreen(
     seekForwardSeconds: Int = 30,
 ) {
     val context = LocalContext.current
-    val exo = remember { ExoPlayer.Builder(context).build().apply { playWhenReady = true } }
+    val exo = remember {
+        // Les serveurs Xtream redirigent souvent http -> https : refusé par défaut (=> erreur de lecture).
+        // L'UA « ExoPlayerLib » est bloqué par certains panneaux. Décodeur logiciel de repli.
+        val http = androidx.media3.datasource.DefaultHttpDataSource.Factory()
+            .setUserAgent("ONYX-TV/1.0 (Android TV)")
+            .setAllowCrossProtocolRedirects(true)
+            .setConnectTimeoutMs(15_000)
+            .setReadTimeoutMs(20_000)
+        ExoPlayer.Builder(
+            context,
+            androidx.media3.exoplayer.DefaultRenderersFactory(context).setEnableDecoderFallback(true),
+        )
+            .setMediaSourceFactory(
+                androidx.media3.exoplayer.source.DefaultMediaSourceFactory(context)
+                    .setDataSourceFactory(androidx.media3.datasource.DefaultDataSource.Factory(context, http))
+                    .setLoadErrorHandlingPolicy(androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy(6)),
+            )
+            .setAudioAttributes(
+                androidx.media3.common.AudioAttributes.Builder()
+                    .setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MOVIE).build(),
+                true,
+            )
+            .build().apply { playWhenReady = true }
+    }
     val focus = remember { FocusRequester() }
     val panelFocus = remember { FocusRequester() }
 
@@ -155,6 +179,9 @@ fun PlayerScreen(
     var durMs by remember { mutableStateOf(0L) }
     var seekNote by remember { mutableStateOf<String?>(null) }
     var playerView by remember { mutableStateOf<PlayerView?>(null) }
+    var liveRetries by remember { mutableIntStateOf(0) }
+    val overlayFocus = remember { FocusRequester() }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
 
     // Fenêtre « générique » (3 dernières minutes) pour la VOD : ▲ lance l'épisode suivant.
     val inCredits = !target.isLive && durMs > 0 && target.next != null && durMs - posMs in 1..(3 * 60_000L)
@@ -182,12 +209,20 @@ fun PlayerScreen(
     }
 
     fun seekBy(deltaMs: Long) {
-        if (currentTarget.isLive) return
+        if (currentTarget.isLive || !exo.isCurrentMediaItemSeekable) return
         val dur = exo.duration.takeIf { it != C.TIME_UNSET } ?: return
         val to = (exo.currentPosition + deltaMs).coerceIn(0L, dur)
         exo.seekTo(to)
         posMs = to
         seekNote = (if (deltaMs >= 0) "⏩ +" else "⏪ −") + "${kotlin.math.abs(deltaMs) / 1000} s   ${fmtClock(to)} / ${fmtClock(dur)}"
+    }
+
+    // Remontée de progression. Pour la VOD, on ignore une durée inconnue (sortie rapide, flux en
+    // échec) : sinon on écrirait « durée 0 » et on EFFACERAIT le point de reprise existant.
+    fun report(t: PlayTarget) {
+        val dur = exo.duration
+        if (!t.isLive && (dur == C.TIME_UNSET || dur <= 0L || exo.playbackState == Player.STATE_IDLE)) return
+        currentOnProgress(t, exo.currentPosition, if (dur == C.TIME_UNSET) 0L else dur)
     }
 
     fun skipCredits(): Boolean {
@@ -213,15 +248,36 @@ fun PlayerScreen(
     // Cycle de vie du lecteur : un seul ExoPlayer pour toute la durée de l'écran (zapping inclus).
     DisposableEffect(exo) {
         val listener = object : Player.Listener {
+            // Direct : un fournisseur coupe souvent la connexion ; on se reconnecte (jusqu'à 5 fois)
+            // au lieu de figer l'image ou d'afficher une erreur.
+            fun reconnectLive(): Boolean {
+                if (liveRetries >= 5) return false
+                liveRetries++
+                buffering = true
+                scope.launch {
+                    delay(1_000L * liveRetries)
+                    runCatching { exo.seekToDefaultPosition(); exo.prepare(); exo.play() }
+                }
+                return true
+            }
             override fun onPlaybackStateChanged(playbackState: Int) {
                 buffering = playbackState == Player.STATE_BUFFERING
-                if (playbackState == Player.STATE_ENDED && !currentTarget.isLive) ended = true
+                if (playbackState == Player.STATE_ENDED) {
+                    if (currentTarget.isLive) reconnectLive() else ended = true
+                }
             }
             override fun onIsPlayingChanged(isPlaying: Boolean) {
-                if (isPlaying) error = null
+                if (isPlaying) { error = null; liveRetries = 0 }
             }
             override fun onTracksChanged(t: Tracks) { tracks = t }
             override fun onPlayerError(e: PlaybackException) {
+                // HLS direct : décroché de la fenêtre live -> on se recale sans erreur.
+                if (e.errorCode == PlaybackException.ERROR_CODE_BEHIND_LIVE_WINDOW) {
+                    runCatching { exo.seekToDefaultPosition(); exo.prepare() }
+                    return
+                }
+                // Direct : erreur réseau transitoire -> reconnexion silencieuse.
+                if (currentTarget.isLive && e.errorCode in 2000..2999 && reconnectLive()) return
                 buffering = false
                 error = when (e.errorCode) {
                     PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED,
@@ -229,6 +285,11 @@ fun PlayerScreen(
                         "Flux injoignable — vérifiez votre connexion ou le serveur."
                     PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS ->
                         "Le serveur a refusé le flux (accès expiré ou chaîne indisponible)."
+                    PlaybackException.ERROR_CODE_IO_FILE_NOT_FOUND ->
+                        "Flux introuvable sur le serveur (chaîne retirée ou adresse changée)."
+                    PlaybackException.ERROR_CODE_IO_INVALID_HTTP_CONTENT_TYPE,
+                    PlaybackException.ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED ->
+                        "Le serveur n'a pas renvoyé un flux vidéo (abonnement expiré ?)."
                     PlaybackException.ERROR_CODE_PARSING_CONTAINER_MALFORMED,
                     PlaybackException.ERROR_CODE_PARSING_MANIFEST_MALFORMED ->
                         "Format de flux non reconnu (essayez l'autre format TS/HLS dans Réglages)."
@@ -249,19 +310,19 @@ fun PlayerScreen(
     // Quitter l'app (Accueil, veille) : position sauvegardée et lecture mise en pause ;
     // retour dans l'app : reprise (retour au direct pour une chaîne).
     val lifecycleOwner = LocalLifecycleOwner.current
+    var wasPlaying by remember { mutableStateOf(true) }
     DisposableEffect(lifecycleOwner, exo) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
                 Lifecycle.Event.ON_STOP -> {
-                    runCatching {
-                        val dur = exo.duration
-                        currentOnProgress(currentTarget, exo.currentPosition, if (dur == C.TIME_UNSET) 0L else dur)
-                    }
-                    exo.pause()
+                    runCatching { report(currentTarget) }
+                    wasPlaying = exo.playWhenReady
+                    exo.stop()   // libère décodeur + connexion fournisseur (position conservée)
                 }
                 Lifecycle.Event.ON_START -> {
-                    if (currentTarget.isLive) exo.seekToDefaultPosition()
-                    exo.play()
+                    runCatching { exo.prepare() }
+                    if (currentTarget.isLive) { exo.seekToDefaultPosition(); exo.play() }
+                    else if (wasPlaying) exo.play()
                 }
                 else -> Unit
             }
@@ -314,26 +375,26 @@ fun PlayerScreen(
     }
     LaunchedEffect(seekNote) { if (seekNote != null) { delay(1_800); seekNote = null } }
 
-    // Remontée périodique de la progression (reprise / récents).
     LaunchedEffect(target.url) {
         while (isActive) {
             delay(5_000)
-            val dur = exo.duration
-            currentOnProgress(currentTarget, exo.currentPosition, if (dur == C.TIME_UNSET) 0L else dur)
+            runCatching { report(target) }
         }
     }
-    // Dernière remontée à la sortie (déclaré après le DisposableEffect du lecteur pour s'exécuter avant release()).
+    // Dernière remontée à la sortie : on CAPTURE la cible de cet effet. Avec currentTarget, au
+    // zapping ou à l'épisode suivant, la position de l'ANCIEN élément était enregistrée sous
+    // l'id du NOUVEAU (épisode suivant marqué « vu », reprise au mauvais endroit).
     DisposableEffect(target.url) {
-        onDispose {
-            runCatching {
-                val dur = exo.duration
-                currentOnProgress(currentTarget, exo.currentPosition, if (dur == C.TIME_UNSET) 0L else dur)
-            }
-        }
+        val captured = target
+        onDispose { runCatching { report(captured) } }
     }
 
     LaunchedEffect(Unit) { repeat(10) { runCatching { focus.requestFocus() }; kotlinx.coroutines.delay(100) } }
     LaunchedEffect(panelOpen) { if (panelOpen) runCatching { panelFocus.requestFocus() } else runCatching { focus.requestFocus() } }
+    LaunchedEffect(error, ended) {
+        delay(80)
+        if (error != null || ended) runCatching { overlayFocus.requestFocus() } else runCatching { focus.requestFocus() }
+    }
 
     BackHandler(enabled = true) { if (panelOpen) panelOpen = false else onExit() }
 
@@ -346,7 +407,16 @@ fun PlayerScreen(
             .onPreviewKeyEvent { ev ->
                 // OK / centre : appui COURT = pause ↔ lecture ; appui LONG = panneau (sous-titres,
                 // audio, format). Beaucoup de télécommandes n'ont pas de touche Menu dédiée.
+                // Retour avec le panneau ouvert : fermer le panneau (sinon Compose « sort » du bouton
+                // vers la Box focalisable, consomme la touche, et les flèches sont mortes jusqu'à OK).
+                if (ev.key == Key.Back && panelOpen) {
+                    if (ev.type == KeyEventType.KeyUp) panelOpen = false
+                    return@onPreviewKeyEvent true
+                }
                 val isOk = ev.key == Key.DirectionCenter || ev.key == Key.Enter || ev.key == Key.NumPadEnter
+                // Écran d'erreur ou de fin : les boutons (Réessayer / Lire maintenant / Retour) doivent
+                // recevoir OK et les flèches ; on laisse donc tout passer aux enfants.
+                if (error != null || ended) return@onPreviewKeyEvent false
                 if (isOk && !panelOpen) {
                     when {
                         ev.type == KeyEventType.KeyDown && ev.nativeKeyEvent.isLongPress -> panelOpen = true
@@ -386,28 +456,27 @@ fun PlayerScreen(
                 PlayerView(ctx).apply {
                     player = exo
                     keepScreenOn = true   // empêche la veille pendant la lecture
+                    // La barre native est AFFICHAGE SEULEMENT. Sinon, à chaque apparition, elle appelle
+                    // requestPlayPauseFocus() et vole le focus Android à Compose : le lecteur devient
+                    // « sourd » (pause / avance / zapping / panneau sans effet). Compose garde toutes les touches.
                     useController = true
+                    isFocusable = false
+                    isFocusableInTouchMode = false
+                    descendantFocusability = android.view.ViewGroup.FOCUS_BLOCK_DESCENDANTS
                     setShowNextButton(false)
                     setShowPreviousButton(false)
+                    setShowRewindButton(false)
+                    setShowFastForwardButton(false)
                     controllerShowTimeoutMs = 4000
                     resizeMode = resize
                     playerView = this
-                    // Repli : CH+/CH− arrivent ici même si Compose ne les intercepte pas.
-                    setOnKeyListener { _, keyCode, event ->
-                        if (event.action != KeyEvent.ACTION_DOWN) return@setOnKeyListener false
-                        when (keyCode) {
-                            KeyEvent.KEYCODE_CHANNEL_UP -> doZap(+1)
-                            KeyEvent.KEYCODE_CHANNEL_DOWN -> doZap(-1)
-                            KeyEvent.KEYCODE_MENU -> { panelOpen = !panelOpen; true }
-                            else -> false
-                        }
-                    }
                 }
             },
             update = { view ->
                 if (view.player !== exo) view.player = exo
                 if (view.resizeMode != resize) view.resizeMode = resize
             },
+            onRelease = { it.player = null },
         )
 
         // Bandeau d'information (titre / catégorie / programme en cours), masqué après quelques secondes.
@@ -562,12 +631,12 @@ fun PlayerScreen(
                     Text("Épisode suivant dans $countdown s", style = MaterialTheme.typography.headlineMedium, color = Color.White)
                     Text(next.title, style = MaterialTheme.typography.bodyLarge, color = OnyxMuted)
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Button(onClick = { currentOnSwitch(next) }) { Text("▶ Lire maintenant") }
+                        Button(onClick = { currentOnSwitch(next) }, modifier = Modifier.focusRequester(overlayFocus)) { Text("▶ Lire maintenant") }
                         Button(onClick = onExit) { Text("Retour") }
                     }
                 } else {
                     Text("Lecture terminée", style = MaterialTheme.typography.headlineMedium, color = Color.White)
-                    Button(onClick = onExit) { Text("Retour") }
+                    Button(onClick = onExit, modifier = Modifier.focusRequester(overlayFocus)) { Text("Retour") }
                 }
             }
         }
@@ -585,7 +654,7 @@ fun PlayerScreen(
                 Text("Lecture interrompue", style = MaterialTheme.typography.headlineMedium, color = Color.White)
                 Text(msg, style = MaterialTheme.typography.bodyLarge, color = OnyxMuted)
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Button(onClick = { load() }) { Text("Réessayer") }
+                    Button(onClick = { load() }, modifier = Modifier.focusRequester(overlayFocus)) { Text("Réessayer") }
                     if (target.isLive && zap != null) Button(onClick = { doZap(+1) }) { Text("Chaîne suivante") }
                     Button(onClick = onExit) { Text("Retour") }
                 }

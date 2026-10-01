@@ -148,6 +148,10 @@ class OnyxViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { userStore.updatePrefs { it.copy(diagnostics = enabled) } }
     }
 
+    fun dismissUpdate(commit: String) {
+        viewModelScope.launch { userStore.updatePrefs { it.copy(dismissedUpdateCommit = commit) } }
+    }
+
     fun setSeekSteps(back: Int, forward: Int) {
         viewModelScope.launch { userStore.updatePrefs { it.copy(seekBackSeconds = back, seekForwardSeconds = forward) } }
     }
@@ -379,7 +383,13 @@ class OnyxViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** Chaîne portant ce numéro (saisie au pavé numérique dans le lecteur). */
-    fun channelByNumber(n: Int): Channel? = _state.value.channels.firstOrNull { it.number == n }
+    /** Chaînes visibles pour le zapping / numéro : catégories verrouillées (parental) exclues. */
+    private fun zapChannels(): List<Channel> {
+        val hidden = hiddenGroups(parental.value, unlockedGroups.value)
+        return _state.value.channels.filter { it.groupTitle !in hidden }
+    }
+
+    fun channelByNumber(n: Int): Channel? = zapChannels().firstOrNull { it.number == n }
 
     /** Titre du programme en cours pour une cible de lecture live (bandeau du lecteur). */
     suspend fun nowPlaying(target: PlayTarget): String? {
@@ -433,7 +443,7 @@ class OnyxViewModel(app: Application) : AndroidViewModel(app) {
     // ---- Zapping ----
     /** Chaîne voisine (+1/−1) dans l'ordre courant, en boucle. */
     fun neighborChannel(currentId: String?, delta: Int): Channel? {
-        val list = _state.value.channels
+        val list = zapChannels()
         if (list.isEmpty()) return null
         val idx = list.indexOfFirst { it.id == currentId }
         if (idx < 0) return list.first()

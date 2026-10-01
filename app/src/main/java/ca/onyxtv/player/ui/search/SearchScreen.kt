@@ -73,6 +73,11 @@ fun SearchScreen(
                 onValueChange = { vm.setSearchQuery(it) },
                 label = { androidx.compose.material3.Text("Rechercher une chaîne, un film, une série…") },
                 singleLine = true,
+                // Clavier ouvert seulement sur OK (sinon il surgit dès qu'on survole le champ).
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                    showKeyboardOnFocus = false,
+                    keyboardType = androidx.compose.ui.text.input.KeyboardType.Ascii,
+                ),
                 modifier = Modifier.fillMaxWidth(),
             )
         }
