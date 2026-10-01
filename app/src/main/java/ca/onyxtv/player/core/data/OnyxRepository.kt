@@ -98,6 +98,50 @@ class OnyxRepository(
     private data class Cached<T>(val at: Long, val value: T)
     private val epgByChannel = HashMap<String, Cached<List<EpgProgram>>>()
     private val xmltvByUrl = HashMap<String, Cached<List<EpgProgram>>>()
+    /** Index du guide par identifiant de chaîne NORMALISÉ (construit une fois par téléchargement). */
+    private val xmltvIndexByUrl = HashMap<String, Pair<Long, Map<String, List<EpgProgram>>>>()
+
+    /**
+     * Normalise un identifiant/nom de chaîne pour l'appariement EPG : minuscules, sans accents,
+     * sans domaine (« tsn1.ca » -> « tsn1 »), sans mentions de qualité (HD/4K…), alphanumérique.
+     */
+    private fun normChan(raw: String): String {
+        var t = java.text.Normalizer.normalize(raw.lowercase(), java.text.Normalizer.Form.NFD)
+            .replace(Regex("\\p{M}"), "")
+        t = t.replace(Regex("\\.[a-z]{2,3}$"), "")
+        t = t.replace(Regex("\\b(hd|fhd|uhd|4k|sd|hevc|h265|raw|vip)\\b"), " ")
+        return t.replace(Regex("[^a-z0-9]"), "")
+    }
+
+    /** Guide complet d'une URL, indexé par identifiant normalisé ; mis en cache par téléchargement. */
+    private suspend fun xmltvIndex(url: String): Map<String, List<EpgProgram>> {
+        val all = xmltv(url)
+        val stamp = synchronized(xmltvByUrl) { xmltvByUrl[url]?.at } ?: 0L
+        synchronized(xmltvIndexByUrl) { xmltvIndexByUrl[url]?.let { (at, idx) -> if (at == stamp) return idx } }
+        val idx = withContext(Dispatchers.Default) { all.groupBy { normChan(it.channelId) } }
+        synchronized(xmltvIndexByUrl) { xmltvIndexByUrl[url] = stamp to idx }
+        return idx
+    }
+
+    /** Programmes d'une chaîne dans un index : par identifiant EPG, puis par nom (exact, puis inclusion). */
+    private fun matchInIndex(idx: Map<String, List<EpgProgram>>, epgChannelId: String?, name: String): List<EpgProgram> {
+        if (idx.isEmpty()) return emptyList()
+        val byId = epgChannelId?.takeIf { it.isNotBlank() }?.let { normChan(it) }
+        if (byId != null) idx[byId]?.takeIf { it.isNotEmpty() }?.let { return it }
+        val byName = normChan(name)
+        if (byName.isBlank()) return emptyList()
+        idx[byName]?.takeIf { it.isNotEmpty() }?.let { return it }
+        if (byName.length >= 4) {
+            idx.entries.firstOrNull { (k, v) -> v.isNotEmpty() && (k == byName || (k.length >= 4 && (k.contains(byName) || byName.contains(k)))) }
+                ?.let { return it.value }
+        }
+        return emptyList()
+    }
+
+    /** Précharge le guide des comptes (appelé après le chargement du catalogue) : le Guide TV s'ouvre déjà rempli. */
+    suspend fun prefetchEpg() {
+        epgUrls().forEach { url -> runCatching { xmltvIndex(url) } }
+    }
 
     /** Vide les caches EPG (mémoire + disque) : le prochain affichage retélécharge le guide. */
     fun clearEpg() {
@@ -151,29 +195,25 @@ class OnyxRepository(
 
         val sources = store.sources.first()
         val result: List<EpgProgram> = run {
-            // Xtream : 1) guide complet xmltv.php du compte (une seule descente pour toutes les
-            // chaînes, plusieurs jours), 2) get_short_epg en secours si la chaîne n'y figure pas.
+            // Xtream : 1) guide COMPLET xmltv.php du compte (intégré à l'URL, plusieurs jours),
+            //    TOUJOURS consulté — même sans epg_channel_id (beaucoup de panneaux ne le renseignent
+            //    pas) : appariement par identifiant EPG, sinon par NOM de chaîne normalisé.
+            // 2) get_short_epg (now/next) en secours si la chaîne n'y figure pas.
             channel.streamId?.let { sid ->
                 val sourceId = channel.id.split(":").getOrNull(1)
                 val src = sources.filterIsInstance<PlaylistSource.Xtream>().firstOrNull { it.id == sourceId }
                     ?: return@run emptyList()
-                // 1) get_short_epg : rapide, par chaîne, fiable (now/next + programmes à venir).
-                //    C'est ce qui fait apparaître le guide immédiatement.
+                val idx = runCatching { xmltvIndex(xt.xmltvUrl(src)) }.getOrDefault(emptyMap())
+                val fromXmltv = matchInIndex(idx, channel.epgChannelId, channel.name)
+                if (fromXmltv.isNotEmpty()) return@run fromXmltv.sortedBy { it.start }
                 val short = runCatching { xt.shortEpg(src, sid, limit = 24) }.getOrDefault(emptyList())
-                if (short.isNotEmpty()) return@run short.sortedBy { it.start }
-                // 2) Repli : guide complet xmltv.php du compte, filtré sur l'identifiant EPG.
-                val fromXmltv = channel.epgChannelId?.takeIf { it.isNotBlank() }?.let { epgId ->
-                    val all = runCatching { xmltv(xt.xmltvUrl(src)) }.getOrDefault(emptyList())
-                    withContext(Dispatchers.Default) { all.filter { it.channelId.equals(epgId, ignoreCase = true) } }
-                }.orEmpty()
-                return@run fromXmltv.sortedBy { it.start }
+                return@run short.sortedBy { it.start }
             }
-            // M3U : XMLTV téléchargé une fois (cache), filtré sur le tvg-id
-            val epgId = channel.epgChannelId ?: return@run emptyList()
+            // M3U : XMLTV de la source (cache), apparié par tvg-id puis par nom.
             val m3u = sources.filterIsInstance<PlaylistSource.M3u>().firstOrNull { !it.epgUrl.isNullOrBlank() }
                 ?: return@run emptyList()
-            val all = xmltv(m3u.epgUrl!!)
-            withContext(Dispatchers.Default) { all.filter { it.channelId.equals(epgId, ignoreCase = true) }.sortedBy { it.start } }
+            val idx = runCatching { xmltvIndex(m3u.epgUrl!!) }.getOrDefault(emptyMap())
+            matchInIndex(idx, channel.epgChannelId, channel.name).sortedBy { it.start }
         }
         // Ne JAMAIS mettre en cache un résultat vide : au démarrage le réseau peut ne pas être
         // prêt, et un vide caché 30 min laisserait le guide désespérément vide.

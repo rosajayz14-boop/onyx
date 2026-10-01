@@ -290,6 +290,8 @@ class OnyxViewModel(app: Application) : AndroidViewModel(app) {
                 .onSuccess { fresh ->
                     val merged = mergeWithPrevious(fresh, _state.value)
                     cache.save(merged)
+                    // Guide TV : précharger le xmltv des comptes en arrière-plan (ouverture déjà remplie).
+                    viewModelScope.launch { runCatching { repo.prefetchEpg() }; _state.update { it.copy(epgVersion = it.epgVersion + 1) } }
                     val nothing = merged.isEmpty && merged.reports.any { it.error != null }
                     _state.update {
                         it.copy(

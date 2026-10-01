@@ -23,6 +23,10 @@ object Http {
 
     private const val UA = "ONYX-TV/1.0 (Android TV)"
 
+    /** Client pour les GROS téléchargements (guide xmltv de 100 Mo, catalogues) : pas de limite
+     *  globale d'appel (callTimeout), seul le readTimeout protège contre un serveur muet. */
+    private val bulk: OkHttpClient by lazy { client.newBuilder().callTimeout(0, TimeUnit.SECONDS).build() }
+
     /** Dossier temporaire pour les grosses réponses (défini au démarrage de l'app). */
     @Volatile var tempDir: java.io.File? = null
 
@@ -32,7 +36,7 @@ object Http {
     /** Télécharge en flux vers [file] (mémoire constante, quelle que soit la taille). */
     suspend fun getToFile(url: String, file: java.io.File): java.io.File = withContext(Dispatchers.IO) {
         val request = Request.Builder().url(url).header("User-Agent", UA).build()
-        client.newCall(request).execute().use { resp ->
+        bulk.newCall(request).execute().use { resp ->
             if (!resp.isSuccessful) throw IOException("HTTP ${resp.code}")
             val body = resp.body ?: throw IOException("Réponse vide")
             body.byteStream().use { input -> file.outputStream().buffered().use { out -> input.copyTo(out, 64 * 1024) } }

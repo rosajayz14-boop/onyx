@@ -290,7 +290,9 @@ class XtreamClient(
 
     /** Millisecondes depuis l'horodatage unix (nombre/texte) ou, à défaut, la date « yyyy-MM-dd HH:mm:ss ». */
     private fun epgMillis(o: JsonObject, tsKey: String, dateKey: String): Long? {
-        o.str(tsKey)?.trim()?.toLongOrNull()?.let { if (it > 0) return it * 1000 }
+        // Certains panneaux renvoient déjà des millisecondes (13 chiffres) : ne pas re-multiplier,
+        // sinon les programmes tombent en l'an 50 000 et sortent de la fenêtre du guide.
+        o.str(tsKey)?.trim()?.toLongOrNull()?.let { if (it > 0) return if (it > 100_000_000_000L) it else it * 1000 }
         val d = o.str(dateKey)?.trim()?.takeIf { it.isNotBlank() } ?: return null
         return runCatching { epgDateFmt.parse(d)?.time }.getOrNull()
     }
