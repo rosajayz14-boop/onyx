@@ -192,20 +192,33 @@ fun OnyxRoot(vm: OnyxViewModel = viewModel()) {
 
     // Reprise du focus dès que rien n'est sélectionné (démarrage, fin du chargement, fermeture
     // d'une fiche/du lecteur, changement de page). On vise le contenu, avec repli sur le menu.
-    LaunchedEffect(dest, overlayOpen, state.loading, state.hasContent, focusNonce) {
+    LaunchedEffect(dest, overlayOpen, state.loading, state.hasContent) {
         if (overlayOpen) {
+            delay(60)
             requestCurrentFocus()
             return@LaunchedEffect
         }
-        // Démarrage, ou retour d'une fiche/du lecteur/du contenu : garantir un focus visible sur
-        // le menu. On teste PRÉCISÉMENT le focus du menu ou du contenu : juste après la fermeture
-        // d'une superposition, le focus « racine » peut rester marqué actif un court instant, ce
-        // qui faisait abandonner la reprise trop tôt et laissait le focus perdu.
-        repeat(25) {
+        // Après une transition (Retour, fermeture de fiche/lecteur, changement de page), laisser
+        // l'état de focus se stabiliser : juste après, le focus de l'écran qui disparaît peut
+        // rester marqué actif un court instant. Sans cette pause on lit un focus « périmé » et on
+        // abandonne la reprise trop tôt, laissant le focus perdu (il fallait réappuyer sur OK).
+        delay(100)
+        repeat(30) {
             if (railHasFocus || contentHasFocus) return@LaunchedEffect
-            if (FocusBridge.nativeViewHasFocus()) return@LaunchedEffect
-            delay(120)
             runCatching { railItemFocus.requestFocus() }
+            delay(110)
+        }
+    }
+
+    // Retour : on FORCE le focus du menu (sans s'arrêter si le contenu semble encore focalisé,
+    // ce qui est souvent un état périmé juste après l'appui sur Retour).
+    LaunchedEffect(focusNonce) {
+        if (focusNonce == 0 || overlayOpen) return@LaunchedEffect
+        delay(60)
+        repeat(20) {
+            if (railHasFocus) return@LaunchedEffect
+            runCatching { railItemFocus.requestFocus() }
+            delay(90)
         }
     }
 
