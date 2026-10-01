@@ -24,12 +24,11 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
-     * Touches de la télécommande : si aucun composant n'a le focus (état où Compose 1.7 avale
-     * les flèches), la touche sert à replacer le focus dans l'écran courant. Une vue native
-     * (bande-annonce YouTube, lecteur) qui a le focus garde ses touches.
+     * On NOTE la touche (diagnostic) mais on ne la consomme JAMAIS : laisser passer les flèches
+     * permet à Android de sortir du mode tactile et de déplacer le focus normalement.
      */
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        if (FocusBridge.onKey(event)) return true
+        FocusBridge.note(event)
         return super.dispatchKeyEvent(event)
     }
 }

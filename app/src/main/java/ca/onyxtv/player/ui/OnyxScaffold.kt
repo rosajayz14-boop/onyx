@@ -30,7 +30,6 @@ import androidx.compose.material.icons.rounded.Today
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -178,14 +177,16 @@ fun OnyxRoot(vm: OnyxViewModel = viewModel()) {
             else -> runCatching { railFocus.requestFocus() }
         }
     }
-    SideEffect { FocusBridge.requestFocus = requestCurrentFocus }
-    DisposableEffect(Unit) {
-        FocusBridge.hasFocus = false
-        onDispose { FocusBridge.hasFocus = false; FocusBridge.requestFocus = null }
+    // Mode télécommande (non-tactile) : sinon Android ignore les flèches et n'affiche pas la
+    // sélection tant qu'on n'a pas appuyé sur OK. On insiste (réessais) le temps que des éléments
+    // focalisables soient composés, puis on garde le mode à chaque changement d'écran.
+    LaunchedEffect(dest, overlayOpen) {
+        repeat(40) {
+            val ok = runCatching { inputModeManager.requestInputMode(InputMode.Keyboard) }.getOrDefault(false)
+            if (ok || inputModeManager.inputMode == InputMode.Keyboard) return@LaunchedEffect
+            delay(150)
+        }
     }
-
-    // Mode télécommande (surbrillance visible) demandé une fois au démarrage.
-    LaunchedEffect(Unit) { runCatching { inputModeManager.requestInputMode(InputMode.Keyboard) } }
 
     // Reprise du focus dès que rien n'est sélectionné (démarrage, fin du chargement, fermeture
     // d'une fiche/du lecteur, changement de page). On vise le contenu, avec repli sur le menu.
@@ -221,7 +222,6 @@ fun OnyxRoot(vm: OnyxViewModel = viewModel()) {
         Modifier
             .fillMaxSize()
             .background(OnyxBg)
-            .onFocusChanged { FocusBridge.hasFocus = it.hasFocus }
     ) {
         Row(Modifier.fillMaxSize()) {
             // ---- Barre latérale (menu) ----
@@ -293,7 +293,7 @@ fun OnyxRoot(vm: OnyxViewModel = viewModel()) {
             Text(
                 "DIAG · page ${dest.name} · touche ${FocusBridge.lastKey.value}" +
                     " · menu ${if (railHasFocus) "OUI" else "NON"} · contenu ${if (contentHasFocus) "OUI" else "NON"}" +
-                    " · récup ${FocusBridge.rescued.intValue} · mode ${inputModeManager.inputMode}",
+                    " · mode ${inputModeManager.inputMode}",
                 style = MaterialTheme.typography.bodyMedium,
                 color = Color.White,
                 modifier = Modifier.align(Alignment.BottomStart).padding(12.dp).background(Color(0xCC000000)).padding(8.dp),
@@ -395,26 +395,28 @@ private fun RailItem(
 @Composable
 private fun FocusRoot(content: @Composable BoxScope.() -> Unit) {
     val root = remember { FocusRequester() }
+    val inputModeManager = LocalInputModeManager.current
     var hasFocus by remember { mutableStateOf(false) }
-    SideEffect { FocusBridge.requestFocus = { runCatching { root.requestFocus() } } }
-    DisposableEffect(Unit) {
-        FocusBridge.hasFocus = false
-        onDispose { FocusBridge.hasFocus = false }
+    LaunchedEffect(Unit) {
+        repeat(40) {
+            val ok = runCatching { inputModeManager.requestInputMode(InputMode.Keyboard) }.getOrDefault(false)
+            if (ok || inputModeManager.inputMode == InputMode.Keyboard) return@LaunchedEffect
+            delay(150)
+        }
     }
     LaunchedEffect(hasFocus) {
         if (hasFocus) return@LaunchedEffect
-        repeat(20) { i ->
-            delay(if (i == 0) 250 else 120)
-            if (FocusBridge.hasFocus || FocusBridge.nativeViewHasFocus()) return@LaunchedEffect
+        repeat(20) {
+            delay(120)
+            if (hasFocus || FocusBridge.nativeViewHasFocus()) return@LaunchedEffect
             runCatching { root.requestFocus() }
-            if (FocusBridge.hasFocus) return@LaunchedEffect
         }
     }
     Box(
         Modifier
             .fillMaxSize()
             .background(OnyxBg)
-            .onFocusChanged { hasFocus = it.hasFocus; FocusBridge.hasFocus = it.hasFocus }
+            .onFocusChanged { hasFocus = it.hasFocus }
             .focusRequester(root)
             .focusGroup(),
         content = content,
