@@ -112,6 +112,37 @@ class OnyxViewModel(app: Application) : AndroidViewModel(app) {
         .flowOn(Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
+    // ---- Suggestions TMDB (tendances de la semaine), limitées à ce qui existe dans le catalogue ----
+    private val tmdbTrending = MutableStateFlow<List<ca.onyxtv.player.core.tmdb.TmdbClient.Trending>>(emptyList())
+    init {
+        val key = ca.onyxtv.player.BuildConfig.TMDB_API_KEY
+        if (key.isNotBlank()) viewModelScope.launch {
+            tmdbTrending.value = runCatching { ca.onyxtv.player.core.tmdb.TmdbClient.trendingWeek(key) }.getOrDefault(emptyList())
+        }
+    }
+    /** Titres tendance TMDB présents dans le catalogue (appariés par titre normalisé + année), affiche TMDB. */
+    val tmdbSuggestions: StateFlow<List<VodItem>> = combine(
+        _state.map { it.vod }.distinctUntilChanged(),
+        tmdbTrending,
+    ) { vod, trend ->
+        if (trend.isEmpty() || vod.isEmpty()) emptyList()
+        else {
+            val byName = HashMap<String, MutableList<VodItem>>()
+            vod.forEach { byName.getOrPut(normTitle(it.name)) { ArrayList() }.add(it) }
+            val seen = HashSet<String>()
+            trend.mapNotNull { t ->
+                val cands = byName[normTitle(t.title)] ?: return@mapNotNull null
+                val pick = cands.firstOrNull { c -> (c.kind == ca.onyxtv.player.core.model.MediaKind.SERIES) == t.tv && (t.year == null || c.year == null || c.year == t.year) }
+                    ?: cands.firstOrNull { c -> (c.kind == ca.onyxtv.player.core.model.MediaKind.SERIES) == t.tv }
+                    ?: return@mapNotNull null
+                if (!seen.add(pick.id)) return@mapNotNull null
+                if (t.posterUrl != null) pick.copy(posterUrl = t.posterUrl) else pick
+            }.take(24)
+        }
+    }
+        .flowOn(Dispatchers.Default)
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
     // ---- Recherche (anti-rebond + arrière-plan) ----
     private val _searchQuery = MutableStateFlow("")
     val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
@@ -493,6 +524,14 @@ fun hiddenGroups(parental: ParentalSettings, unlocked: Set<String>): Set<String>
  * Recommandations : heuristique locale basée sur les catégories des favoris et des récents.
  * Sans historique, on privilégie les mieux notés. Les contenus déjà vus sont écartés.
  */
+/** Titre normalisé pour l'appariement TMDB <-> catalogue : minuscules, sans accents, sans ponctuation, sans tags [FR]/(2019)/VF. */
+fun normTitle(raw: String): String {
+    var t = java.text.Normalizer.normalize(raw.lowercase(), java.text.Normalizer.Form.NFD).replace(Regex("\\p{M}"), "")
+    t = t.replace(Regex("\\[[^\\]]*\\]|\\([^)]*\\)"), " ")           // [FR] / (2019)
+    t = t.replace(Regex("\\b(vf|vff|vostfr|vo|multi|fr|en|hd|4k|uhd|fhd|the|le|la|les|l)\\b"), " ")
+    return t.replace(Regex("[^a-z0-9]"), "")
+}
+
 fun recommendVod(vod: List<VodItem>, favorites: Set<String>, seen: Set<String>, limit: Int = 24): List<VodItem> {
     fun rating(v: VodItem) = v.rating?.toFloatOrNull() ?: 0f
     val likedCats = vod.filter { it.id in favorites || it.id in seen }

@@ -328,7 +328,17 @@ class OnyxRepository(
         val sourceId = item.id.split(":").getOrNull(1) ?: return null
         val src = store.sources.first().filterIsInstance<PlaylistSource.Xtream>()
             .firstOrNull { it.id == sourceId } ?: return null
-        return xt.seriesInfo(src, seriesId, item.name)
+        val base = xt.seriesInfo(src, seriesId, item.name)
+        if (!base.trailerUrl.isNullOrBlank()) return base
+        // Repli bande-annonce : TMDB (séries), si une clé est configurée.
+        val tmdbKey = ca.onyxtv.player.BuildConfig.TMDB_API_KEY
+        if (tmdbKey.isNotBlank()) {
+            val yt = runCatching {
+                ca.onyxtv.player.core.tmdb.TmdbClient.tvTrailerYoutubeId(tmdbKey, item.name, item.year)
+            }.getOrNull()
+            if (!yt.isNullOrBlank()) return base.copy(trailerUrl = "https://www.youtube.com/watch?v=$yt")
+        }
+        return base
     }
 
     private companion object {

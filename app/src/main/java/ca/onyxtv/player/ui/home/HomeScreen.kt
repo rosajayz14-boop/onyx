@@ -94,6 +94,8 @@ fun HomeScreen(
     val favVod = remember(vod, favorites) { vod.filter { it.id in favorites } }
     val recommendedAll by vm.recommended.collectAsStateWithLifecycle()
     val recommended = remember(recommendedAll, hidden) { recommendedAll.filterNot { it.category in hidden } }
+    val tmdbAll by vm.tmdbSuggestions.collectAsStateWithLifecycle()
+    val tmdb = remember(tmdbAll, hidden) { tmdbAll.filterNot { it.category in hidden } }
 
     // Mise en avant : reprise en cours > film recommandé > première chaîne.
     val heroResume = resumable.firstOrNull()
@@ -222,6 +224,24 @@ fun HomeScreen(
                             seed = c.id,
                             initials = c.name.take(2).uppercase(),
                             onClick = { onPlay(c.toPlayTarget()) },
+                        )
+                    }
+                }
+            }
+        }
+        if (tmdb.isNotEmpty()) {
+            item {
+                Rail("Tendances de la semaine", badge = "TMDB") {
+                    items(tmdb, key = { "t" + it.id }) { v ->
+                        MediaCard(
+                            title = v.name,
+                            subtitle = v.year ?: v.category,
+                            imageUrl = v.posterUrl,
+                            seed = v.id,
+                            width = 130.dp,
+                            aspectRatio = 2f / 3f,
+                            initials = v.name.take(1).uppercase(),
+                            onClick = { openVod(v) },
                         )
                     }
                 }

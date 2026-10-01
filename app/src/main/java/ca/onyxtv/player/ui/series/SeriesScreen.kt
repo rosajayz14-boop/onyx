@@ -45,6 +45,8 @@ import ca.onyxtv.player.player.PlayTarget
 import ca.onyxtv.player.ui.components.EmptyState
 import ca.onyxtv.player.ui.components.LoadingState
 import ca.onyxtv.player.ui.components.Thumbnail
+import ca.onyxtv.player.ui.movie.TrailerScreen
+import ca.onyxtv.player.ui.movie.youtubeId
 import ca.onyxtv.player.ui.theme.OnyxBg
 import ca.onyxtv.player.ui.theme.OnyxCyan
 import ca.onyxtv.player.ui.theme.OnyxMuted
@@ -131,8 +133,15 @@ private fun SeriesContent(
     var season by remember(detail) { mutableIntStateOf(nextUp?.season ?: seasons.first()) }
     val playFocus = remember { androidx.compose.ui.focus.FocusRequester() }
     var playFocused by remember { mutableStateOf(false) }
-    androidx.compose.runtime.LaunchedEffect(detail, active) {
-        if (!active) return@LaunchedEffect
+    // Bande-annonce : YouTube lu dans l'app ; lien direct (mp4…) lu par ONYX.
+    var trailerId by remember { mutableStateOf<String?>(null) }
+    fun openTrailer(url: String) {
+        val id = youtubeId(url)
+        if (id != null) trailerId = id
+        else onPlay(PlayTarget(url = url, title = "Bande-annonce · ${item.name}", subtitle = item.name, imageUrl = item.posterUrl))
+    }
+    androidx.compose.runtime.LaunchedEffect(detail, active, trailerId) {
+        if (!active || trailerId != null) return@LaunchedEffect
         repeat(12) {
             androidx.compose.runtime.withFrameNanos { }
             if (playFocused) return@LaunchedEffect
@@ -155,6 +164,11 @@ private fun SeriesContent(
             startPositionMs = positionById[ep.id] ?: 0L,
             next = following?.let { target(it) },
         )
+    }
+
+    trailerId?.let { id ->
+        TrailerScreen(videoId = id, title = item.name, onBack = { trailerId = null })
+        return
     }
 
     Row(Modifier.fillMaxSize().padding(32.dp)) {
@@ -210,6 +224,7 @@ private fun SeriesContent(
                         )
                     }
                 }
+                detail.trailerUrl?.let { url -> Button(onClick = { openTrailer(url) }) { Text("🎬 Bande-annonce") } }
                 Button(onClick = onToggleFavorite) {
                     Text(if (isFavorite) "★ Retirer des favoris" else "☆ Ajouter aux favoris")
                 }

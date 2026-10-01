@@ -79,6 +79,8 @@ data class SeriesDetail(
     val plot: String? = null,
     val coverUrl: String? = null,
     val seasons: Map<Int, List<Episode>>,
+    /** Bande-annonce (YouTube ou lien direct), fournie par la source ou par TMDB. */
+    val trailerUrl: String? = null,
 ) {
     val seasonNumbers: List<Int> get() = seasons.keys.sorted()
     val episodeCount: Int get() = seasons.values.sumOf { it.size }

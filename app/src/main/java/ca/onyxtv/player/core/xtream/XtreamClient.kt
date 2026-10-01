@@ -211,6 +211,9 @@ class XtreamClient(
             name = infoObj?.str("name")?.takeIf { it.isNotBlank() } ?: fallbackName,
             plot = infoObj?.str("plot"),
             coverUrl = infoCover,
+            trailerUrl = infoObj?.str("youtube_trailer")?.trim()?.takeIf { it.isNotBlank() }?.let {
+                if (it.startsWith("http", true)) it else "https://www.youtube.com/watch?v=$it"
+            },
             seasons = seasons.mapValues { (_, v) -> v.sortedBy { it.number } },
         )
     }

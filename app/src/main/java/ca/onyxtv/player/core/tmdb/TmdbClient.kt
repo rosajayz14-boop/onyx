@@ -18,18 +18,53 @@ import kotlinx.serialization.json.jsonPrimitive
  */
 object TmdbClient {
     private const val BASE = "https://api.themoviedb.org/3"
+    private const val IMG = "https://image.tmdb.org/t/p/w342"
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
 
-    /** Identifiant YouTube de la bande-annonce (titre + année), ou null. */
-    suspend fun trailerYoutubeId(apiKey: String, title: String, year: String?): String? {
+    /** Un titre tendance TMDB (film ou série) : titre, année, affiche. */
+    data class Trending(val title: String, val year: String?, val posterUrl: String?, val tv: Boolean)
+
+    /** Tendances de la semaine (films puis séries), en français. Vide sans clé ou en cas d'erreur. */
+    suspend fun trendingWeek(apiKey: String): List<Trending> {
+        if (apiKey.isBlank()) return emptyList()
+        return withContext(Dispatchers.IO) {
+            val out = ArrayList<Trending>()
+            for (kind in listOf("movie", "tv")) {
+                runCatching {
+                    val root = json.parseToJsonElement(
+                        Http.get("$BASE/trending/$kind/week?api_key=$apiKey&language=fr-FR")
+                    ).jsonObject
+                    (root["results"] as? JsonArray)?.map { it.jsonObject }?.forEach { o ->
+                        val title = (o["title"] ?: o["name"])?.jsonPrimitive?.content?.takeIf { it.isNotBlank() }
+                            ?: return@forEach
+                        val date = (o["release_date"] ?: o["first_air_date"])?.jsonPrimitive?.content
+                        val poster = o["poster_path"]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() && it != "null" }
+                        out += Trending(title, date?.take(4)?.takeIf { it.length == 4 }, poster?.let { IMG + it }, tv = kind == "tv")
+                    }
+                }
+            }
+            out
+        }
+    }
+
+    /** Identifiant YouTube de la bande-annonce d'un FILM (titre + année), ou null. */
+    suspend fun trailerYoutubeId(apiKey: String, title: String, year: String?): String? =
+        trailerFor(apiKey, title, year, tv = false)
+
+    /** Identifiant YouTube de la bande-annonce d'une SÉRIE (titre + année), ou null. */
+    suspend fun tvTrailerYoutubeId(apiKey: String, title: String, year: String?): String? =
+        trailerFor(apiKey, title, year, tv = true)
+
+    private suspend fun trailerFor(apiKey: String, title: String, year: String?, tv: Boolean): String? {
         if (apiKey.isBlank() || title.isBlank()) return null
         return withContext(Dispatchers.IO) {
             runCatching {
                 val q = java.net.URLEncoder.encode(title, "UTF-8")
                 val y = year?.filter { it.isDigit() }?.take(4)?.takeIf { it.length == 4 }
-                val yParam = y?.let { "&year=$it" } ?: ""
+                val kind = if (tv) "tv" else "movie"
+                val yKey = if (tv) "first_air_date_year" else "year"
                 val search = json.parseToJsonElement(
-                    Http.get("$BASE/search/movie?api_key=$apiKey&language=fr-FR&include_adult=false&query=$q$yParam")
+                    Http.get("$BASE/search/$kind?api_key=$apiKey&language=fr-FR&include_adult=false&query=$q" + (y?.let { "&$yKey=$it" } ?: ""))
                 ).jsonObject
                 val results = search["results"] as? JsonArray ?: return@runCatching null
                 val movieId = results.firstOrNull()?.jsonObject?.get("id")?.jsonPrimitive?.int
@@ -37,7 +72,7 @@ object TmdbClient {
                 // Vidéos : on cherche une bande-annonce YouTube (fr puis en), sinon toute vidéo YouTube.
                 for (lang in listOf("fr-FR", "en-US")) {
                     val vids = json.parseToJsonElement(
-                        Http.get("$BASE/movie/$movieId/videos?api_key=$apiKey&language=$lang")
+                        Http.get("$BASE/$kind/$movieId/videos?api_key=$apiKey&language=$lang")
                     ).jsonObject
                     val arr = (vids["results"] as? JsonArray)?.map { it.jsonObject }.orEmpty()
                     fun site(o: JsonObject) = o["site"]?.jsonPrimitive?.content ?: ""
