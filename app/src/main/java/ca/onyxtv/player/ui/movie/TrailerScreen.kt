@@ -63,14 +63,11 @@ fun TrailerScreen(videoId: String, title: String, onBack: () -> Unit) {
         }
     }
 
-    val html = remember(videoId) {
-        """
-        <!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1">
-        <style>html,body{margin:0;padding:0;background:#000;height:100%;overflow:hidden}
-        iframe{position:absolute;top:0;left:0;width:100%;height:100%;border:0}</style></head>
-        <body><iframe src="https://www.youtube.com/embed/$videoId?autoplay=1&controls=1&rel=0&modestbranding=1&playsinline=1&fs=0&iv_load_policy=3&enablejsapi=1&origin=https://www.youtube.com"
-        allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen></iframe></body></html>
-        """.trimIndent()
+    // URL d'intégration chargée DIRECTEMENT comme page (origine youtube.com réelle) : c'est
+    // bien plus fiable que d'imbriquer l'iframe dans une page HTML locale, qui fait souvent
+    // afficher un code d'erreur au lecteur YouTube.
+    val embedUrl = remember(videoId) {
+        "https://www.youtube.com/embed/$videoId?autoplay=1&playsinline=1&rel=0&modestbranding=1&controls=1&fs=1"
     }
 
     Box(Modifier.fillMaxSize().background(Color.Black)) {
@@ -80,6 +77,7 @@ fun TrailerScreen(videoId: String, title: String, onBack: () -> Unit) {
                 WebView(ctx).apply {
                     layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
                     setBackgroundColor(AColor.BLACK)
+                    keepScreenOn = true   // empêche la veille pendant la bande-annonce
                     settings.javaScriptEnabled = true
                     settings.domStorageEnabled = true
                     settings.mediaPlaybackRequiresUserGesture = false
@@ -97,7 +95,7 @@ fun TrailerScreen(videoId: String, title: String, onBack: () -> Unit) {
                     }
                     isFocusable = true
                     isFocusableInTouchMode = true
-                    loadDataWithBaseURL("https://www.youtube.com", html, "text/html", "utf-8", null)
+                    loadUrl(embedUrl)
                     requestFocus()
                     webView = this
                 }

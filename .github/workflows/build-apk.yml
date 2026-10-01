@@ -116,6 +116,8 @@ jobs:
           ONYX_STORE_PW: ${{ secrets.ONYX_STORE_PW }}
           ONYX_KEY_ALIAS: ${{ secrets.ONYX_KEY_ALIAS }}
           ONYX_KEY_PW: ${{ secrets.ONYX_KEY_PW }}
+          # Clé TMDB facultative (bandes-annonces). Sans ce secret, la fonctionnalité reste inactive.
+          TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
         run: ./gradlew :app:assembleRelease --no-daemon --stacktrace
 
       - name: Prepare APK

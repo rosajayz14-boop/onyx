@@ -224,7 +224,14 @@ class XtreamClient(
         val info = root["info"] as? JsonObject ?: return MovieDetail()
         val rating10 = info.str("rating")?.toFloatOrNull()?.takeIf { it > 0f }
             ?: info.str("rating_5based")?.toFloatOrNull()?.takeIf { it > 0f }?.times(2f)
-        val trailer = info.str("youtube_trailer")?.trim()?.takeIf { it.isNotBlank() }?.let {
+        // Le lien de bande-annonce se trouve selon les panneaux dans info, movie_data ou à la racine.
+        val movieData = root["movie_data"] as? JsonObject
+        val trailerRaw = sequenceOf(
+            info.str("youtube_trailer"), info.str("trailer"),
+            movieData?.str("youtube_trailer"), movieData?.str("trailer"),
+            root.str("youtube_trailer"),
+        ).firstOrNull { !it.isNullOrBlank() }
+        val trailer = trailerRaw?.trim()?.takeIf { it.isNotBlank() }?.let {
             if (it.startsWith("http", true)) it else "https://www.youtube.com/watch?v=$it"
         }
         val backdrop = (info["backdrop_path"] as? JsonArray)?.firstOrNull()?.let { (it as? JsonPrimitive)?.content }

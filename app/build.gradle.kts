@@ -37,6 +37,9 @@ android {
         buildConfigField("String", "DEFAULT_SERVER", "\"http://vpn.tvmoderne.ca\"")
         buildConfigField("String", "UPDATE_API_URL", "\"https://api.github.com/repos/$repo/releases/tags/tv-latest\"")
         buildConfigField("String", "UPDATE_APK_URL", "\"https://github.com/$repo/releases/download/tv-latest/onyx-tv.apk\"")
+        // Clé TMDB (facultative) pour les bandes-annonces quand la source IPTV n'en fournit pas.
+        // Fournie au build via le secret GitHub TMDB_API_KEY (vide = fonctionnalité inactive).
+        buildConfigField("String", "TMDB_API_KEY", "\"${System.getenv("TMDB_API_KEY") ?: ""}\"")
     }
 
     // Signature de release, uniquement si une clé est fournie (voir en-tête du fichier).

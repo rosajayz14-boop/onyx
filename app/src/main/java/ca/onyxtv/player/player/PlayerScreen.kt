@@ -372,6 +372,7 @@ fun PlayerScreen(
             factory = { ctx ->
                 PlayerView(ctx).apply {
                     player = exo
+                    keepScreenOn = true   // empêche la veille pendant la lecture
                     useController = true
                     setShowNextButton(false)
                     setShowPreviousButton(false)
