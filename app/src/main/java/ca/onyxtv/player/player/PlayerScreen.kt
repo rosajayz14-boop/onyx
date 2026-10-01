@@ -332,7 +332,7 @@ fun PlayerScreen(
         }
     }
 
-    LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
+    LaunchedEffect(Unit) { repeat(10) { runCatching { focus.requestFocus() }; kotlinx.coroutines.delay(100) } }
     LaunchedEffect(panelOpen) { if (panelOpen) runCatching { panelFocus.requestFocus() } else runCatching { focus.requestFocus() } }
 
     BackHandler(enabled = true) { if (panelOpen) panelOpen = false else onExit() }
@@ -362,14 +362,14 @@ fun PlayerScreen(
                     return@onPreviewKeyEvent if (ev.key == Key.Menu) { panelOpen = false; true } else false
                 }
                 val digit = DIGIT_KEYS[ev.key]
-                val controllerShown = playerView?.isControllerFullyVisible == true
                 when {
                     ev.key == Key.Menu -> { panelOpen = true; true }
-                    // VOD : ▲ passe l'intro au début, lance l'épisode suivant à la fin.
+                    // VOD : ▲ passe l'intro/générique si on y est, sinon ouvre le panneau (pistes/format).
                     !currentTarget.isLive && ev.key == Key.DirectionUp && inCredits -> skipCredits()
-                    // VOD : ◀ / ▶ = recul / avance quand la barre de contrôle est masquée.
-                    !currentTarget.isLive && !controllerShown && ev.key == Key.DirectionLeft -> { seekBy(-seekBackSeconds * 1000L); true }
-                    !currentTarget.isLive && !controllerShown && ev.key == Key.DirectionRight -> { seekBy(seekForwardSeconds * 1000L); true }
+                    !currentTarget.isLive && ev.key == Key.DirectionUp -> { panelOpen = true; true }
+                    // VOD : ◀ / ▶ = recul / avance (toujours actifs).
+                    !currentTarget.isLive && ev.key == Key.DirectionLeft -> { seekBy(-seekBackSeconds * 1000L); true }
+                    !currentTarget.isLive && ev.key == Key.DirectionRight -> { seekBy(seekForwardSeconds * 1000L); true }
                     digit != null && currentTarget.isLive && currentZapToNumber != null -> {
                         if (digits.length < 4) digits += digit
                         true
