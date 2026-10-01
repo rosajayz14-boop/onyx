@@ -2,6 +2,7 @@ package ca.onyxtv.player
 
 import android.os.Bundle
 import android.view.KeyEvent
+import android.view.View
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.core.view.WindowCompat
@@ -21,6 +22,18 @@ class MainActivity : ComponentActivity() {
                 OnyxRoot()
             }
         }
+        // Sortie du MODE TACTILE, UNE SEULE FOIS, après la première composition. En mode tactile
+        // Android refuse de poser une sélection : après un Retour, le focus est nul et les flèches
+        // n'ont rien à déplacer (il faut OK). requestFocusFromTouch() quitte le mode tactile pour
+        // toute la session (une TV n'a pas d'écran tactile, donc il n'y revient pas).
+        // UN seul appel différé, sans boucle ni onWindowFocusChanged : c'est la boucle répétée du
+        // build 44 qui avait gelé l'app.
+        window.decorView.postDelayed({
+            runCatching {
+                val content = findViewById<View>(android.R.id.content)
+                if (content != null && content.isInTouchMode) content.requestFocusFromTouch()
+            }
+        }, 300)
     }
 
     /** On NOTE la touche (diagnostic) mais on ne la consomme JAMAIS : laisser passer les flèches. */
