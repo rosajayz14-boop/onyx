@@ -142,3 +142,5 @@ dependencies {
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.kotlinx.coroutines.android)
 }
+
+// Rebuild pour intégrer la clé TMDB (bandes-annonces via The Movie Database).
