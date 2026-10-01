@@ -63,11 +63,29 @@ fun TrailerScreen(videoId: String, title: String, onBack: () -> Unit) {
         }
     }
 
-    // URL d'intégration chargée DIRECTEMENT comme page (origine youtube.com réelle) : c'est
-    // bien plus fiable que d'imbriquer l'iframe dans une page HTML locale, qui fait souvent
-    // afficher un code d'erreur au lecteur YouTube.
-    val embedUrl = remember(videoId) {
-        "https://www.youtube.com/embed/$videoId?autoplay=1&playsinline=1&rel=0&modestbranding=1&controls=1&fs=1"
+    // API officielle « IFrame Player » de YouTube, servie avec l'origine https://www.youtube.com.
+    // C'est la méthode fiable : charger directement .../embed/ID donne l'erreur 153 (référent
+    // manquant), et imbriquer une simple iframe donne souvent un code d'erreur. L'API IFrame,
+    // elle, est acceptée comme sur un vrai site.
+    val html = remember(videoId) {
+        """
+        <!DOCTYPE html><html><head>
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <style>html,body{margin:0;padding:0;background:#000;height:100%;overflow:hidden}
+        #player{position:absolute;top:0;left:0;width:100%;height:100%}</style></head>
+        <body><div id="player"></div>
+        <script src="https://www.youtube.com/iframe_api"></script>
+        <script>
+        var player;
+        function onYouTubeIframeAPIReady(){
+          player=new YT.Player('player',{
+            width:'100%',height:'100%',videoId:'$videoId',
+            playerVars:{autoplay:1,controls:1,rel:0,modestbranding:1,playsinline:1,fs:1,iv_load_policy:3},
+            events:{onReady:function(e){e.target.playVideo();}}
+          });
+        }
+        </script></body></html>
+        """.trimIndent()
     }
 
     Box(Modifier.fillMaxSize().background(Color.Black)) {
@@ -95,7 +113,7 @@ fun TrailerScreen(videoId: String, title: String, onBack: () -> Unit) {
                     }
                     isFocusable = true
                     isFocusableInTouchMode = true
-                    loadUrl(embedUrl)
+                    loadDataWithBaseURL("https://www.youtube.com", html, "text/html", "utf-8", null)
                     requestFocus()
                     webView = this
                 }
