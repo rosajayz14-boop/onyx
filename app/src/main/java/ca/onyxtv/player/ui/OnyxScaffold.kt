@@ -1,5 +1,6 @@
 package ca.onyxtv.player.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -167,7 +168,6 @@ fun OnyxRoot(vm: OnyxViewModel = viewModel()) {
     val focusManager = LocalFocusManager.current
     var railHasFocus by remember { mutableStateOf(false) }
     var contentHasFocus by remember { mutableStateOf(false) }
-    var rootHasFocus by remember { mutableStateOf(false) }
     val overlayOpen = playing != null || openDetail != null
 
     // Cible de focus courante, pour le pont Activity (FocusBridge) et la reprise automatique.
@@ -194,13 +194,24 @@ fun OnyxRoot(vm: OnyxViewModel = viewModel()) {
             requestCurrentFocus()
             return@LaunchedEffect
         }
-        // Au démarrage / après fermeture d'une superposition : placer le focus sur le menu
-        // (toujours focalisable). L'utilisateur entre dans le contenu avec la flèche droite.
-        repeat(15) { i ->
-            if (rootHasFocus || FocusBridge.nativeViewHasFocus()) return@LaunchedEffect
-            delay(if (i == 0) 150 else 120)
+        // Démarrage, ou retour d'une fiche/du lecteur/du contenu : garantir un focus visible sur
+        // le menu. On teste PRÉCISÉMENT le focus du menu ou du contenu : juste après la fermeture
+        // d'une superposition, le focus « racine » peut rester marqué actif un court instant, ce
+        // qui faisait abandonner la reprise trop tôt et laissait le focus perdu.
+        repeat(20) { i ->
+            if (railHasFocus || contentHasFocus) return@LaunchedEffect
+            if (FocusBridge.nativeViewHasFocus()) return@LaunchedEffect
+            delay(120)
             runCatching { railFocus.requestFocus() }
-            if (FocusBridge.hasFocus) return@LaunchedEffect
+        }
+    }
+
+    // Retour : depuis le contenu -> revenir au menu (évite de perdre le focus) ; depuis le menu
+    // d'une autre page -> Accueil ; depuis l'Accueil -> laisser le système quitter l'app.
+    BackHandler(enabled = !overlayOpen && (contentHasFocus || dest != Dest.HOME)) {
+        when {
+            contentHasFocus -> runCatching { railFocus.requestFocus() }
+            dest != Dest.HOME -> dest = Dest.HOME
         }
     }
 
@@ -210,10 +221,7 @@ fun OnyxRoot(vm: OnyxViewModel = viewModel()) {
         Modifier
             .fillMaxSize()
             .background(OnyxBg)
-            .onFocusChanged {
-                rootHasFocus = it.hasFocus
-                FocusBridge.hasFocus = it.hasFocus
-            }
+            .onFocusChanged { FocusBridge.hasFocus = it.hasFocus }
     ) {
         Row(Modifier.fillMaxSize()) {
             // ---- Barre latérale (menu) ----

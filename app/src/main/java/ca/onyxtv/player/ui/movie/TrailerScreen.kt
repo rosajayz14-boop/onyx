@@ -83,6 +83,12 @@ fun TrailerScreen(videoId: String, title: String, onBack: () -> Unit) {
                     settings.javaScriptEnabled = true
                     settings.domStorageEnabled = true
                     settings.mediaPlaybackRequiresUserGesture = false
+                    settings.javaScriptCanOpenWindowsAutomatically = true
+                    // YouTube sert un lecteur intégrable fiable aux navigateurs de bureau ;
+                    // avec l'UA WebView par défaut, l'intégration est souvent refusée (écran noir).
+                    settings.userAgentString =
+                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+                        "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
                     settings.loadWithOverviewMode = true
                     settings.useWideViewPort = true
                     webChromeClient = WebChromeClient()

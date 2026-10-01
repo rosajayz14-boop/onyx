@@ -143,12 +143,16 @@ class OnyxRepository(
                 val sourceId = channel.id.split(":").getOrNull(1)
                 val src = sources.filterIsInstance<PlaylistSource.Xtream>().firstOrNull { it.id == sourceId }
                     ?: return@run emptyList()
+                // 1) get_short_epg : rapide, par chaîne, fiable (now/next + programmes à venir).
+                //    C'est ce qui fait apparaître le guide immédiatement.
+                val short = runCatching { xt.shortEpg(src, sid, limit = 24) }.getOrDefault(emptyList())
+                if (short.isNotEmpty()) return@run short.sortedBy { it.start }
+                // 2) Repli : guide complet xmltv.php du compte, filtré sur l'identifiant EPG.
                 val fromXmltv = channel.epgChannelId?.takeIf { it.isNotBlank() }?.let { epgId ->
-                    val all = xmltv(xt.xmltvUrl(src))
+                    val all = runCatching { xmltv(xt.xmltvUrl(src)) }.getOrDefault(emptyList())
                     withContext(Dispatchers.Default) { all.filter { it.channelId.equals(epgId, ignoreCase = true) } }
                 }.orEmpty()
-                if (fromXmltv.isNotEmpty()) return@run fromXmltv.sortedBy { it.start }
-                return@run runCatching { xt.shortEpg(src, sid, limit = 30) }.getOrDefault(emptyList())
+                return@run fromXmltv.sortedBy { it.start }
             }
             // M3U : XMLTV téléchargé une fois (cache), filtré sur le tvg-id
             val epgId = channel.epgChannelId ?: return@run emptyList()
