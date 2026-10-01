@@ -128,6 +128,20 @@ class OnyxRepository(
         epgUrls().forEach { url -> runCatching { xmltv(url, force = true) } }
     }
 
+    /** Diagnostic EPG lisible pour une chaîne (Réglages → Mode diagnostic). */
+    suspend fun epgDiag(channel: Channel): String {
+        val sources = store.sources.first()
+        val sid = channel.streamId ?: return "pas de streamId"
+        val sourceId = channel.id.split(":").getOrNull(1)
+        val src = sources.filterIsInstance<PlaylistSource.Xtream>().firstOrNull { it.id == sourceId }
+            ?: return "source introuvable ($sourceId)"
+        val short = runCatching { xt.shortEpg(src, sid, 24) }
+        val xml = runCatching { xmltv(xt.xmltvUrl(src)) }
+        val shortTxt = short.getOrNull()?.size?.toString() ?: ("ERR " + short.exceptionOrNull()?.let { Http.describe(it) })
+        val xmlTxt = xml.getOrNull()?.size?.toString() ?: ("ERR " + xml.exceptionOrNull()?.let { Http.describe(it) })
+        return "sid=$sid epgId=${channel.epgChannelId ?: "∅"} · short=$shortTxt · xmltv=$xmlTxt"
+    }
+
     /** Guide (now/next) pour une chaîne. Xtream via short_epg ; M3U via XMLTV. Mis en cache. */
     suspend fun epg(channel: Channel): List<EpgProgram> {
         val now = System.currentTimeMillis()

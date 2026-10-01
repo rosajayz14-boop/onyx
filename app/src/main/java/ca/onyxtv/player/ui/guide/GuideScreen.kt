@@ -96,6 +96,7 @@ fun GuideScreen(vm: OnyxViewModel, onPlay: (PlayTarget) -> Unit) {
     val favorites by vm.favorites.collectAsStateWithLifecycle()
     val parental by vm.parental.collectAsStateWithLifecycle()
     val unlocked by vm.unlockedGroups.collectAsStateWithLifecycle()
+    val prefs by vm.prefs.collectAsStateWithLifecycle()
     val hidden = hiddenGroups(parental, unlocked)
     val channels = remember(state.channels, hidden) { state.channels.filterNot { it.groupTitle in hidden } }
 
@@ -137,6 +138,12 @@ fun GuideScreen(vm: OnyxViewModel, onPlay: (PlayTarget) -> Unit) {
     }
 
     Column(Modifier.fillMaxSize().padding(start = 24.dp, end = 24.dp, top = 20.dp, bottom = 12.dp)) {
+        if (prefs.diagnostics && shown.isNotEmpty()) {
+            val diag by produceState("EPG DIAG · …", shown.first().id, state.epgVersion) {
+                value = "EPG DIAG · " + runCatching { vm.epgDiag(shown.first()) }.getOrElse { "err ${it.message}" }
+            }
+            Text(diag, color = OnyxCyan, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(bottom = 6.dp))
+        }
         DetailsPanel(
             focus = focus,
             now = now,
