@@ -27,10 +27,11 @@ object FocusBridge {
     val rescued = mutableIntStateOf(0)
     val lastKey = mutableStateOf("—")
 
+    // Seules les flèches servent à récupérer le focus. OK/Enter n'est jamais consommé par le
+    // pont : il doit toujours activer l'élément sélectionné.
     private val navKeys = setOf(
         KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN,
         KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT,
-        KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_NUMPAD_ENTER,
     )
 
     /**

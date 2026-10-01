@@ -1,16 +1,22 @@
 package ca.onyxtv.player.ui
 
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Dvr
 import androidx.compose.material.icons.rounded.GridView
@@ -24,34 +30,31 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
-import androidx.compose.foundation.layout.BoxScope
-import kotlinx.coroutines.delay
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.foundation.focusGroup
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
-import androidx.compose.ui.input.InputMode
-import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.platform.LocalInputModeManager
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.InputMode
+import androidx.compose.ui.platform.LocalInputModeManager
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import androidx.tv.material3.DrawerValue
 import androidx.tv.material3.Icon
 import androidx.tv.material3.MaterialTheme
-import androidx.tv.material3.NavigationDrawer
-import androidx.tv.material3.NavigationDrawerItem
 import androidx.tv.material3.Text
 import ca.onyxtv.player.R
+import ca.onyxtv.player.core.model.MediaKind
+import ca.onyxtv.player.core.model.VodItem
 import ca.onyxtv.player.player.PlayTarget
 import ca.onyxtv.player.player.PlayerScreen
 import ca.onyxtv.player.ui.components.PinDialog
@@ -61,17 +64,18 @@ import ca.onyxtv.player.ui.guide.GuideScreen
 import ca.onyxtv.player.ui.home.HomeScreen
 import ca.onyxtv.player.ui.live.LiveTvScreen
 import ca.onyxtv.player.ui.mosaic.MosaicScreen
-import ca.onyxtv.player.core.model.MediaKind
-import ca.onyxtv.player.core.model.VodItem
 import ca.onyxtv.player.ui.movie.MovieScreen
 import ca.onyxtv.player.ui.search.SearchScreen
 import ca.onyxtv.player.ui.series.SeriesScreen
 import ca.onyxtv.player.ui.settings.SettingsScreen
 import ca.onyxtv.player.ui.theme.OnyxBg
 import ca.onyxtv.player.ui.theme.OnyxBg2
+import ca.onyxtv.player.ui.theme.OnyxCyan
 import ca.onyxtv.player.ui.theme.OnyxMuted
-import ca.onyxtv.player.ui.vod.VodScreen
+import ca.onyxtv.player.ui.theme.OnyxSurfaceHi
+import ca.onyxtv.player.ui.theme.OnyxText
 import ca.onyxtv.player.viewmodel.OnyxViewModel
+import kotlinx.coroutines.delay
 
 enum class Dest(val label: String, val icon: ImageVector) {
     SEARCH("Recherche", Icons.Rounded.Search),
@@ -126,6 +130,7 @@ fun OnyxRoot(vm: OnyxViewModel = viewModel()) {
     // Reprise automatique de la dernière lecture à l'ouverture (option Réglages → Lecture).
     val prefs by vm.prefs.collectAsStateWithLifecycle()
     val recents by vm.recents.collectAsStateWithLifecycle()
+    val state by vm.state.collectAsStateWithLifecycle()
     var autoResumed by remember { mutableStateOf(false) }
     LaunchedEffect(prefs.resumeOnStart, recents) {
         if (!autoResumed && prefs.resumeOnStart && recents.isNotEmpty()) {
@@ -136,55 +141,68 @@ fun OnyxRoot(vm: OnyxViewModel = viewModel()) {
 
     // Vérification de mise à jour à chaque retour au premier plan (limitée à 1×/jour dans le VM).
     val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
-    androidx.compose.runtime.DisposableEffect(lifecycleOwner) {
+    DisposableEffect(lifecycleOwner) {
         val obs = androidx.lifecycle.LifecycleEventObserver { _, e -> if (e == androidx.lifecycle.Lifecycle.Event.ON_START) vm.checkForUpdate() }
         lifecycleOwner.lifecycle.addObserver(obs)
         onDispose { lifecycleOwner.lifecycle.removeObserver(obs) }
     }
 
-    // Focus. Trois cibles possibles : la page, la fiche (film/série), le lecteur. Le pont
-    // FocusBridge permet à l'Activity de replacer le focus quand une touche arrive alors que
-    // rien n'est sélectionné (blocage connu de Compose 1.7 : la vue garde le focus système
-    // sans composant sélectionné → les flèches ne font rien).
+    // ---- Focus ----
+    // Le menu latéral (barre) et le contenu sont deux groupes de focus voisins. La navigation
+    // gauche/droite entre eux est gérée par la recherche de focus native de Compose (fiable).
+    // Le tv-material NavigationDrawer, qui piégeait le focus (flèches sans effet, menu bloqué),
+    // n'est plus utilisé.
+    val railFocus = remember { FocusRequester() }
     val contentFocus = remember { FocusRequester() }
     val detailFocus = remember { FocusRequester() }
     val playerFocus = remember { FocusRequester() }
     val inputModeManager = LocalInputModeManager.current
+    var railHasFocus by remember { mutableStateOf(false) }
+    var contentHasFocus by remember { mutableStateOf(false) }
     var rootHasFocus by remember { mutableStateOf(false) }
     val overlayOpen = playing != null || openDetail != null
+
+    // Cible de focus courante, pour le pont Activity (FocusBridge) et la reprise automatique.
     val requestCurrentFocus: () -> Unit = {
-        val target = when {
-            playing != null -> playerFocus
-            openDetail != null -> detailFocus
-            else -> contentFocus
+        when {
+            playing != null -> runCatching { playerFocus.requestFocus() }
+            openDetail != null -> runCatching { detailFocus.requestFocus() }
+            else -> {
+                // On vise le contenu ; s'il n'a encore rien de focalisable (chargement), le menu.
+                if (!runCatching { contentFocus.requestFocus() }.getOrDefault(false)) {
+                    runCatching { railFocus.requestFocus() }
+                }
+            }
         }
-        runCatching { target.requestFocus() }
     }
     SideEffect { FocusBridge.requestFocus = requestCurrentFocus }
     DisposableEffect(Unit) {
         FocusBridge.hasFocus = false
         onDispose { FocusBridge.hasFocus = false; FocusBridge.requestFocus = null }
     }
+
     // Mode télécommande (surbrillance visible) demandé une fois au démarrage.
     LaunchedEffect(Unit) { runCatching { inputModeManager.requestInputMode(InputMode.Keyboard) } }
-    // Dès que rien n'a le focus (démarrage, fin du chargement, fiche/lecteur fermé), on le
-    // replace dans l'écran courant, avec quelques tentatives le temps que la page se compose.
-    val state by vm.state.collectAsStateWithLifecycle()
-    LaunchedEffect(rootHasFocus, overlayOpen, dest, state.loading, state.hasContent) {
-        if (rootHasFocus) return@LaunchedEffect
-        repeat(20) { i ->
-            delay(if (i == 0) 300 else 100)
-            // Une vue native (bande-annonce) qui a le focus le garde.
-            if (FocusBridge.hasFocus || FocusBridge.nativeViewHasFocus()) return@LaunchedEffect
+
+    // Reprise du focus dès que rien n'est sélectionné (démarrage, fin du chargement, fermeture
+    // d'une fiche/du lecteur, changement de page). On vise le contenu, avec repli sur le menu.
+    LaunchedEffect(dest, overlayOpen, state.loading, state.hasContent, rootHasFocus) {
+        if (overlayOpen) {
             requestCurrentFocus()
-            if (FocusBridge.hasFocus) return@LaunchedEffect
+            return@LaunchedEffect
         }
+        repeat(15) { i ->
+            if (contentHasFocus) return@LaunchedEffect
+            if (FocusBridge.nativeViewHasFocus()) return@LaunchedEffect
+            delay(if (i == 0) 200 else 120)
+            val gotContent = runCatching { contentFocus.requestFocus() }.getOrDefault(false)
+            if (gotContent || contentHasFocus) return@LaunchedEffect
+        }
+        // Repli : au moins le menu a le focus, la navigation reste possible.
+        if (!FocusBridge.hasFocus && !FocusBridge.nativeViewHasFocus()) runCatching { railFocus.requestFocus() }
     }
-    // Changement de page depuis le menu : le focus entre directement dans la page.
-    LaunchedEffect(dest) {
-        delay(150)
-        if (playing == null && openDetail == null) runCatching { contentFocus.requestFocus() }
-    }
+
+    val railWidth by animateDpAsState(if (railHasFocus) 232.dp else 84.dp, label = "rail")
 
     Box(
         Modifier
@@ -195,63 +213,55 @@ fun OnyxRoot(vm: OnyxViewModel = viewModel()) {
                 FocusBridge.hasFocus = it.hasFocus
             }
     ) {
-        // Tant qu'une fiche ou le lecteur est ouvert, le menu et la page en dessous ne doivent
-        // pas recevoir le focus (voir aussi le piège « exit = Cancel » sur chaque superposition).
-        Box(Modifier.fillMaxSize().focusProperties { canFocus = !overlayOpen }) {
-        NavigationDrawer(
-            drawerContent = { drawerValue ->
-                Column(
-                    Modifier
-                        .fillMaxHeight()
-                        .background(OnyxBg2)
-                        .padding(12.dp)
-                        .focusProperties { canFocus = !overlayOpen },
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
+        Row(Modifier.fillMaxSize()) {
+            // ---- Barre latérale (menu) ----
+            Column(
+                Modifier
+                    .width(railWidth)
+                    .fillMaxHeight()
+                    .background(OnyxBg2)
+                    .onFocusChanged { railHasFocus = it.hasFocus }
+                    .focusRequester(railFocus)
+                    .focusGroup()
+                    .focusProperties { canFocus = !overlayOpen }
+                    .padding(vertical = 16.dp, horizontal = 10.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(start = 6.dp, top = 4.dp, bottom = 18.dp),
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.padding(start = 8.dp, top = 8.dp, bottom = 16.dp),
-                    ) {
-                        Icon(
-                            painter = painterResource(R.drawable.ic_launcher),
-                            contentDescription = "ONYX",
-                            tint = Color.Unspecified,
-                            modifier = Modifier.size(30.dp),
-                        )
-                        if (drawerValue == DrawerValue.Open) {
-                            Spacer(Modifier.width(12.dp))
-                            Text(
-                                "ONYX",
-                                style = MaterialTheme.typography.titleLarge,
-                                color = MaterialTheme.colorScheme.onBackground,
-                            )
-                        }
-                    }
-
-                    Dest.entries.forEach { d ->
-                        NavigationDrawerItem(
-                            selected = d == dest,
-                            onClick = { dest = d },
-                            leadingContent = {
-                                Icon(imageVector = d.icon, contentDescription = d.label)
-                            },
-                        ) {
-                            Text(d.label)
-                        }
+                    Icon(
+                        painter = painterResource(R.drawable.ic_launcher),
+                        contentDescription = "ONYX",
+                        tint = Color.Unspecified,
+                        modifier = Modifier.size(34.dp),
+                    )
+                    if (railHasFocus) {
+                        Spacer(Modifier.width(12.dp))
+                        Text("ONYX", style = MaterialTheme.typography.titleLarge, color = OnyxText)
                     }
                 }
-            },
-        ) {
+                Dest.entries.forEach { d ->
+                    RailItem(
+                        dest = d,
+                        selected = d == dest,
+                        expanded = railHasFocus,
+                        onClick = { dest = d },
+                    )
+                }
+            }
+
+            // ---- Contenu ----
             Box(
                 Modifier
-                    .fillMaxSize()
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .onFocusChanged { contentHasFocus = it.hasFocus }
                     .focusRequester(contentFocus)
-                    // focusRestorer() volontairement absent : bug Compose 1.7 avec les listes
-                    // (« Release should only be called once » → plantage).
                     .focusGroup()
+                    .focusProperties { canFocus = !overlayOpen }
             ) {
-                // À l'intérieur du groupe : la propriété s'applique aux éléments de la page.
-                Box(Modifier.fillMaxSize().focusProperties { canFocus = !overlayOpen }) {
                 when (dest) {
                     Dest.HOME -> HomeScreen(vm, onPlay = { playing = it }, onGoLive = { dest = Dest.LIVE }, onGoSettings = { dest = Dest.SETTINGS }, onOpenDetail = { openDetail = it })
                     Dest.LIVE -> LiveTvScreen(vm, onPlay = { playing = it })
@@ -262,18 +272,15 @@ fun OnyxRoot(vm: OnyxViewModel = viewModel()) {
                     Dest.SETTINGS -> SettingsScreen(vm)
                     Dest.SEARCH -> SearchScreen(vm, onPlay = { playing = it }, onOpenDetail = { openDetail = it })
                 }
-                }
             }
         }
-
-        } // fin du contenu focalisable
 
         // Cadre de diagnostic (Réglages → Application → Mode diagnostic).
         if (prefs.diagnostics) {
             Text(
-                "DIAG · page ${dest.name} · touche ${FocusBridge.lastKey.value} · focus ${if (rootHasFocus) "OUI" else "NON"}" +
-                    " · récupérées ${FocusBridge.rescued.intValue} · mode ${inputModeManager.inputMode}" +
-                    " · fiche ${if (openDetail != null) "ouverte" else "fermée"} · lecteur ${if (playing != null) "ouvert" else "fermé"}",
+                "DIAG · page ${dest.name} · touche ${FocusBridge.lastKey.value}" +
+                    " · menu ${if (railHasFocus) "OUI" else "NON"} · contenu ${if (contentHasFocus) "OUI" else "NON"}" +
+                    " · récup ${FocusBridge.rescued.intValue} · mode ${inputModeManager.inputMode}",
                 style = MaterialTheme.typography.bodyMedium,
                 color = Color.White,
                 modifier = Modifier.align(Alignment.BottomStart).padding(12.dp).background(Color(0xCC000000)).padding(8.dp),
@@ -292,7 +299,6 @@ fun OnyxRoot(vm: OnyxViewModel = viewModel()) {
             )
         }
 
-        // Fiche série par-dessus la navigation ; le lecteur reste au-dessus de tout.
         // Chaque superposition est un groupe de focus « piégé » : les flèches ne peuvent pas en
         // sortir vers l'écran caché en dessous (exit = Cancel).
         openDetail?.let { item ->
@@ -336,6 +342,39 @@ fun OnyxRoot(vm: OnyxViewModel = viewModel()) {
     }
 }
 
+/** Élément du menu latéral : focalisable (recherche de focus native), surbrillance nette au focus. */
+@Composable
+private fun RailItem(
+    dest: Dest,
+    selected: Boolean,
+    expanded: Boolean,
+    onClick: () -> Unit,
+) {
+    var focused by remember { mutableStateOf(false) }
+    val bg = when {
+        focused -> OnyxCyan
+        selected -> OnyxSurfaceHi
+        else -> Color.Transparent
+    }
+    val fg = if (focused) OnyxBg else OnyxText
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .onFocusChanged { focused = it.isFocused }
+            .clickable(onClick = onClick)
+            .background(bg)
+            .padding(horizontal = 12.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(imageVector = dest.icon, contentDescription = dest.label, tint = fg, modifier = Modifier.size(26.dp))
+        if (expanded) {
+            Spacer(Modifier.width(14.dp))
+            Text(dest.label, color = fg, style = MaterialTheme.typography.titleMedium, maxLines = 1)
+        }
+    }
+}
+
 /**
  * Écran plein autonome (PIN, mise à jour) : suit le focus pour le pont Activity et sait le
  * replacer dans son premier élément si une touche arrive alors que rien n'est sélectionné.
@@ -352,7 +391,7 @@ private fun FocusRoot(content: @Composable BoxScope.() -> Unit) {
     LaunchedEffect(hasFocus) {
         if (hasFocus) return@LaunchedEffect
         repeat(20) { i ->
-            delay(if (i == 0) 300 else 100)
+            delay(if (i == 0) 250 else 120)
             if (FocusBridge.hasFocus || FocusBridge.nativeViewHasFocus()) return@LaunchedEffect
             runCatching { root.requestFocus() }
             if (FocusBridge.hasFocus) return@LaunchedEffect
@@ -379,7 +418,7 @@ private fun UpdateScreen(
     onInstall: () -> Unit,
     onLater: () -> Unit,
 ) {
-    val laterFocus = remember { androidx.compose.ui.focus.FocusRequester() }
+    val laterFocus = remember { FocusRequester() }
     LaunchedEffect(Unit) {
         repeat(3) { delay(120); if (runCatching { laterFocus.requestFocus() }.isSuccess) return@LaunchedEffect }
     }
