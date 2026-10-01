@@ -255,20 +255,41 @@ class XtreamClient(
 
     private fun JsonObject.int(key: String): Int? = str(key)?.toDoubleOrNull()?.toInt()
 
-    /** EPG court (now/next…) pour une chaîne. Les titres/description sont en Base64. */
-    suspend fun shortEpg(src: PlaylistSource.Xtream, streamId: String, limit: Int = 8): List<EpgProgram> {
-        val r = getOne<XtShortEpg>(api(src, "get_short_epg", "&stream_id=$streamId&limit=$limit"))
-        return r.listings.mapNotNull { item ->
-            val start = item.startTs?.times(1000) ?: return@mapNotNull null
-            val stop = item.stopTs?.times(1000) ?: return@mapNotNull null
-            EpgProgram(
-                channelId = streamId,
-                title = decodeB64(item.title).ifBlank { "Programme" },
-                description = decodeB64(item.description).ifBlank { null },
-                start = start,
-                stop = stop,
-            )
+    /**
+     * EPG court (now/next…) pour une chaîne. Décodage TOLÉRANT : les panneaux varient énormément.
+     * Horodatages acceptés en nombre OU en texte (start_timestamp / stop_timestamp), avec repli sur
+     * les dates « start » / « end » (yyyy-MM-dd HH:mm:ss). Titres/descriptions en Base64 OU en clair.
+     */
+    suspend fun shortEpg(src: PlaylistSource.Xtream, streamId: String, limit: Int = 8): List<EpgProgram> =
+        withContext(Dispatchers.IO) {
+            val root = runCatching { json.parseToJsonElement(Http.get(api(src, "get_short_epg", "&stream_id=$streamId&limit=$limit"))) }.getOrNull()
+            val listings = ((root as? JsonObject)?.get("epg_listings") as? JsonArray)
+                ?: (root as? JsonArray)   // certains panneaux renvoient directement un tableau
+                ?: return@withContext emptyList()
+            listings.mapNotNull { el ->
+                val o = el as? JsonObject ?: return@mapNotNull null
+                val start = epgMillis(o, "start_timestamp", "start") ?: return@mapNotNull null
+                val stop = epgMillis(o, "stop_timestamp", "end") ?: return@mapNotNull null
+                if (stop <= start) return@mapNotNull null
+                EpgProgram(
+                    channelId = streamId,
+                    title = decodeB64(o.str("title") ?: "").ifBlank { "Programme" },
+                    description = decodeB64(o.str("description") ?: "").ifBlank { null },
+                    start = start,
+                    stop = stop,
+                )
+            }.sortedBy { it.start }
         }
+
+    private val epgDateFmt by lazy {
+        java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US)
+    }
+
+    /** Millisecondes depuis l'horodatage unix (nombre/texte) ou, à défaut, la date « yyyy-MM-dd HH:mm:ss ». */
+    private fun epgMillis(o: JsonObject, tsKey: String, dateKey: String): Long? {
+        o.str(tsKey)?.trim()?.toLongOrNull()?.let { if (it > 0) return it * 1000 }
+        val d = o.str(dateKey)?.trim()?.takeIf { it.isNotBlank() } ?: return null
+        return runCatching { epgDateFmt.parse(d)?.time }.getOrNull()
     }
 
     private fun decodeB64(s: String): String = runCatching {
