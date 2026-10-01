@@ -285,10 +285,12 @@ private fun GuideRow(
     onFocus: (EpgProgram?) -> Unit,
     onOpen: (EpgProgram?) -> Unit,
 ) {
-    val programs by produceState(initialValue = emptyList<EpgProgram>(), channel.id, epgVersion) {
-        value = runCatching { vm.epgFor(channel) }.getOrDefault(emptyList())
-            .filter { it.stop > windowStart && it.start < windowEnd }
-            .sortedBy { it.start }
+    val allPrograms by produceState(initialValue = emptyList<EpgProgram>(), channel.id, epgVersion) {
+        value = runCatching { vm.epgFor(channel) }.getOrDefault(emptyList()).sortedBy { it.start }
+    }
+    // Filtrage sur la fenêtre COURANTE (recalculée chaque minute) : la grille ne se fige pas.
+    val programs = remember(allPrograms, windowStart, windowEnd) {
+        allPrograms.filter { it.stop > windowStart && it.start < windowEnd }
     }
 
     Row(Modifier.fillMaxWidth().height(ROW_H)) {

@@ -161,7 +161,9 @@ class OnyxRepository(
             val all = xmltv(m3u.epgUrl!!)
             withContext(Dispatchers.Default) { all.filter { it.channelId.equals(epgId, ignoreCase = true) }.sortedBy { it.start } }
         }
-        synchronized(epgByChannel) { epgByChannel[channel.id] = Cached(now, result) }
+        // Ne JAMAIS mettre en cache un résultat vide : au démarrage le réseau peut ne pas être
+        // prêt, et un vide caché 30 min laisserait le guide désespérément vide.
+        if (result.isNotEmpty()) synchronized(epgByChannel) { epgByChannel[channel.id] = Cached(now, result) }
         return result
     }
 

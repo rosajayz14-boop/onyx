@@ -283,6 +283,7 @@ class XtreamClient(
 
     private val epgDateFmt by lazy {
         java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US)
+            .apply { timeZone = java.util.TimeZone.getTimeZone("UTC") }
     }
 
     /** Millisecondes depuis l'horodatage unix (nombre/texte) ou, à défaut, la date « yyyy-MM-dd HH:mm:ss ». */

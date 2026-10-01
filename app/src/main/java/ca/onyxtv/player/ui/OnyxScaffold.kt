@@ -161,6 +161,8 @@ fun OnyxRoot(vm: OnyxViewModel = viewModel()) {
     // Le tv-material NavigationDrawer, qui piégeait le focus (flèches sans effet, menu bloqué),
     // n'est plus utilisé.
     val railFocus = remember { FocusRequester() }
+    val railItemFocus = remember { FocusRequester() }
+    var focusNonce by remember { mutableStateOf(0) }
     val detailFocus = remember { FocusRequester() }
     val playerFocus = remember { FocusRequester() }
     val inputModeManager = LocalInputModeManager.current
@@ -174,7 +176,7 @@ fun OnyxRoot(vm: OnyxViewModel = viewModel()) {
         when {
             playing != null -> runCatching { playerFocus.requestFocus() }
             openDetail != null -> runCatching { detailFocus.requestFocus() }
-            else -> runCatching { railFocus.requestFocus() }
+            else -> runCatching { railItemFocus.requestFocus() }
         }
     }
     // Mode télécommande (non-tactile) : sinon Android ignore les flèches et n'affiche pas la
@@ -190,7 +192,7 @@ fun OnyxRoot(vm: OnyxViewModel = viewModel()) {
 
     // Reprise du focus dès que rien n'est sélectionné (démarrage, fin du chargement, fermeture
     // d'une fiche/du lecteur, changement de page). On vise le contenu, avec repli sur le menu.
-    LaunchedEffect(dest, overlayOpen, state.loading, state.hasContent) {
+    LaunchedEffect(dest, overlayOpen, state.loading, state.hasContent, focusNonce) {
         if (overlayOpen) {
             requestCurrentFocus()
             return@LaunchedEffect
@@ -199,11 +201,11 @@ fun OnyxRoot(vm: OnyxViewModel = viewModel()) {
         // le menu. On teste PRÉCISÉMENT le focus du menu ou du contenu : juste après la fermeture
         // d'une superposition, le focus « racine » peut rester marqué actif un court instant, ce
         // qui faisait abandonner la reprise trop tôt et laissait le focus perdu.
-        repeat(20) { i ->
+        repeat(25) {
             if (railHasFocus || contentHasFocus) return@LaunchedEffect
             if (FocusBridge.nativeViewHasFocus()) return@LaunchedEffect
             delay(120)
-            runCatching { railFocus.requestFocus() }
+            runCatching { railItemFocus.requestFocus() }
         }
     }
 
@@ -211,8 +213,8 @@ fun OnyxRoot(vm: OnyxViewModel = viewModel()) {
     // d'une autre page -> Accueil ; depuis l'Accueil -> laisser le système quitter l'app.
     BackHandler(enabled = !overlayOpen && (contentHasFocus || dest != Dest.HOME)) {
         when {
-            contentHasFocus -> runCatching { railFocus.requestFocus() }
-            dest != Dest.HOME -> dest = Dest.HOME
+            contentHasFocus -> { runCatching { railItemFocus.requestFocus() }; focusNonce++ }
+            dest != Dest.HOME -> { dest = Dest.HOME; focusNonce++ }
         }
     }
 
@@ -263,6 +265,7 @@ fun OnyxRoot(vm: OnyxViewModel = viewModel()) {
                         dest = d,
                         selected = d == dest,
                         expanded = railHasFocus,
+                        focusRequester = if (d == dest) railItemFocus else null,
                         onClick = { dest = d },
                     )
                 }
@@ -274,6 +277,7 @@ fun OnyxRoot(vm: OnyxViewModel = viewModel()) {
                     .weight(1f)
                     .fillMaxHeight()
                     .onFocusChanged { contentHasFocus = it.hasFocus }
+                    .focusGroup()
             ) {
                 when (dest) {
                     Dest.HOME -> HomeScreen(vm, onPlay = { playing = it }, onGoLive = { dest = Dest.LIVE }, onGoSettings = { dest = Dest.SETTINGS }, onOpenDetail = { openDetail = it })
@@ -361,6 +365,7 @@ private fun RailItem(
     dest: Dest,
     selected: Boolean,
     expanded: Boolean,
+    focusRequester: FocusRequester?,
     onClick: () -> Unit,
 ) {
     var focused by remember { mutableStateOf(false) }
@@ -374,6 +379,7 @@ private fun RailItem(
         Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(10.dp))
+            .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
             .onFocusChanged { focused = it.isFocused }
             .clickable(onClick = onClick)
             .background(bg)

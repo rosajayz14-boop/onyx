@@ -17,6 +17,7 @@ object XmltvParser {
 
     private val TIME_FMT = SimpleDateFormat("yyyyMMddHHmmss Z", Locale.US)
     private val TIME_FMT_NO_TZ = SimpleDateFormat("yyyyMMddHHmmss", Locale.US)
+        .apply { timeZone = java.util.TimeZone.getTimeZone("UTC") }
 
     /**
      * Parse un XMLTV. [fromMs]/[toMs] limitent les programmes conservés à une fenêtre de temps :

@@ -344,6 +344,19 @@ fun PlayerScreen(
             .focusRequester(focus)
             .focusable()
             .onPreviewKeyEvent { ev ->
+                // OK / centre : appui COURT = pause ↔ lecture ; appui LONG = panneau (sous-titres,
+                // audio, format). Beaucoup de télécommandes n'ont pas de touche Menu dédiée.
+                val isOk = ev.key == Key.DirectionCenter || ev.key == Key.Enter || ev.key == Key.NumPadEnter
+                if (isOk && !panelOpen) {
+                    when {
+                        ev.type == KeyEventType.KeyDown && ev.nativeKeyEvent.isLongPress -> panelOpen = true
+                        ev.type == KeyEventType.KeyUp && !ev.nativeKeyEvent.isCanceled -> {
+                            if (exo.isPlaying) exo.pause() else exo.play()
+                            runCatching { playerView?.showController() }
+                        }
+                    }
+                    return@onPreviewKeyEvent true
+                }
                 if (ev.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                 if (panelOpen) {
                     return@onPreviewKeyEvent if (ev.key == Key.Menu) { panelOpen = false; true } else false
