@@ -74,16 +74,18 @@ fun MovieScreen(
         value = runCatching { vm.movieDetail(item) }.getOrNull() ?: MovieDetail(plot = item.plot)
     }
     val playFocus = remember { androidx.compose.ui.focus.FocusRequester() }
-    androidx.compose.runtime.LaunchedEffect(item.id) {
-        repeat(3) { kotlinx.coroutines.delay(100); if (runCatching { playFocus.requestFocus() }.isSuccess) return@LaunchedEffect }
+    // Bande-annonce : YouTube lu dans l'app (lecteur embarqué) ; lien direct (mp4…) lu par ONYX.
+    var trailerId by remember { mutableStateOf<String?>(null) }
+    // Focus sur « Lire » à l'ouverture ET au retour de la bande-annonce (trailerId repasse à null) :
+    // sinon, après fermeture du lecteur YouTube (vue native), la fiche reste sans sélection.
+    androidx.compose.runtime.LaunchedEffect(item.id, trailerId) {
+        if (trailerId != null) return@LaunchedEffect
+        repeat(8) { kotlinx.coroutines.delay(100); if (runCatching { playFocus.requestFocus() }.isSuccess) return@LaunchedEffect }
     }
     val recent = recents.firstOrNull { it.id == item.id && it.resumable }
     val seen = recents.any { it.id == item.id && it.finished }
 
     BackHandler(enabled = true) { onBack() }
-
-    // Bande-annonce : YouTube lu dans l'app (lecteur embarqué) ; lien direct (mp4…) lu par ONYX.
-    var trailerId by remember { mutableStateOf<String?>(null) }
     fun openTrailer(url: String) {
         val id = youtubeId(url)
         if (id != null) trailerId = id
