@@ -171,14 +171,6 @@ fun OnyxRoot(vm: OnyxViewModel = viewModel()) {
     var contentHasFocus by remember { mutableStateOf(false) }
     val overlayOpen = playing != null || openDetail != null
 
-    // Cible de focus courante, pour le pont Activity (FocusBridge) et la reprise automatique.
-    val requestCurrentFocus: () -> Unit = {
-        when {
-            playing != null -> runCatching { playerFocus.requestFocus() }
-            openDetail != null -> runCatching { detailFocus.requestFocus() }
-            else -> runCatching { railItemFocus.requestFocus() }
-        }
-    }
     // Mode télécommande (non-tactile) : sinon Android ignore les flèches et n'affiche pas la
     // sélection tant qu'on n'a pas appuyé sur OK. On insiste (réessais) le temps que des éléments
     // focalisables soient composés, puis on garde le mode à chaque changement d'écran.
@@ -194,8 +186,9 @@ fun OnyxRoot(vm: OnyxViewModel = viewModel()) {
     // d'une fiche/du lecteur, changement de page). On vise le contenu, avec repli sur le menu.
     LaunchedEffect(dest, overlayOpen, state.loading, state.hasContent) {
         if (overlayOpen) {
-            delay(60)
-            requestCurrentFocus()
+            // Le lecteur et les fiches placent EUX-MÊMES leur focus. Si le groupe parent le demande
+            // aussi, les deux se disputent le focus et l'écran interne ne reçoit pas les touches
+            // (lecteur « sourd » : pause/avance/panneau sans effet).
             return@LaunchedEffect
         }
         // Après une transition (Retour, fermeture de fiche/lecteur, changement de page), laisser
@@ -273,6 +266,15 @@ fun OnyxRoot(vm: OnyxViewModel = viewModel()) {
                         Text("ONYX", style = MaterialTheme.typography.titleLarge, color = OnyxText)
                     }
                 }
+                if (prefs.diagnostics) {
+                    Text(
+                        "DIAG mode=${inputModeManager.inputMode} menu=${if (railHasFocus) "OUI" else "NON"} " +
+                            "contenu=${if (contentHasFocus) "OUI" else "NON"} touche=${FocusBridge.lastKey.value}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = OnyxCyan,
+                        modifier = Modifier.padding(bottom = 8.dp),
+                    )
+                }
                 Dest.entries.forEach { d ->
                     RailItem(
                         dest = d,
@@ -303,18 +305,6 @@ fun OnyxRoot(vm: OnyxViewModel = viewModel()) {
                     Dest.SEARCH -> SearchScreen(vm, onPlay = { playing = it }, onOpenDetail = { openDetail = it })
                 }
             }
-        }
-
-        // Cadre de diagnostic (Réglages → Application → Mode diagnostic).
-        if (prefs.diagnostics) {
-            Text(
-                "DIAG · page ${dest.name} · touche ${FocusBridge.lastKey.value}" +
-                    " · menu ${if (railHasFocus) "OUI" else "NON"} · contenu ${if (contentHasFocus) "OUI" else "NON"}" +
-                    " · mode ${inputModeManager.inputMode}",
-                style = MaterialTheme.typography.bodyMedium,
-                color = Color.White,
-                modifier = Modifier.align(Alignment.BottomStart).padding(12.dp).background(Color(0xCC000000)).padding(8.dp),
-            )
         }
 
         // Horloge discrète (mise à jour chaque 30 s), masquée pendant la lecture.
