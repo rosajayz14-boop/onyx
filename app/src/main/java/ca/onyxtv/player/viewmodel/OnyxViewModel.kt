@@ -37,6 +37,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import ca.onyxtv.player.ui.components.toPlayTarget
 import java.io.File
 import java.util.UUID
 import kotlinx.coroutines.flow.first
@@ -471,6 +472,19 @@ class OnyxViewModel(app: Application) : AndroidViewModel(app) {
 
     fun removeRecent(id: String) {
         viewModelScope.launch { userStore.removeRecent(id) }
+    }
+
+    /**
+     * Cible de lecture d'un récent avec l'URL ACTUELLE du catalogue. L'URL mémorisée au moment
+     * de la lecture peut être périmée (extension, serveur, identifiants changés) : rejouer une
+     * vieille URL donne un flux noir ou une « vidéo » de quelques minutes renvoyée par le panneau.
+     */
+    fun freshTarget(r: RecentItem): PlayTarget {
+        val st = _state.value
+        val base = st.channels.firstOrNull { it.id == r.id }?.toPlayTarget()
+            ?: st.vod.firstOrNull { it.id == r.id }?.toPlayTarget()
+            ?: return r.toPlayTarget()
+        return base.copy(startPositionMs = if (r.resumable) r.positionMs else 0L)
     }
 
     // ---- Zapping ----

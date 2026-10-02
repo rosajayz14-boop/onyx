@@ -45,6 +45,8 @@ import ca.onyxtv.player.ui.components.LoadingState
 import ca.onyxtv.player.ui.components.PinDialog
 import ca.onyxtv.player.ui.components.Thumbnail
 import ca.onyxtv.player.ui.components.toPlayTarget
+import ca.onyxtv.player.ui.components.LocalContextMenu
+import ca.onyxtv.player.ui.components.channelMenu
 import ca.onyxtv.player.ui.theme.OnyxCyan
 import ca.onyxtv.player.ui.theme.OnyxLive
 import ca.onyxtv.player.ui.theme.OnyxMuted
@@ -67,6 +69,7 @@ private const val GROUP_FAV = "\u0000fav"
 fun LiveTvScreen(vm: OnyxViewModel, onPlay: (PlayTarget) -> Unit) {
     val state by vm.state.collectAsStateWithLifecycle()
     val favorites by vm.favorites.collectAsStateWithLifecycle()
+    val showMenu = LocalContextMenu.current
     val parental by vm.parental.collectAsStateWithLifecycle()
     val unlocked by vm.unlockedGroups.collectAsStateWithLifecycle()
     val hidden = hiddenGroups(parental, unlocked)
@@ -144,6 +147,7 @@ fun LiveTvScreen(vm: OnyxViewModel, onPlay: (PlayTarget) -> Unit) {
                         ListItem(
                             selected = c.id == selected?.id,
                             onClick = { onPlay(c.toPlayTarget()) },
+                            onLongClick = { showMenu(channelMenu(c, c.id in favorites, play = { onPlay(c.toPlayTarget()) }, toggleFavorite = { vm.toggleFavorite(c.id) })) },
                             leadingContent = {
                                 Box(Modifier.size(52.dp).clip(RoundedCornerShape(6.dp))) {
                                     Thumbnail(c.logoUrl, c.name.take(2).uppercase(), c.id, Modifier.fillMaxSize())

@@ -154,7 +154,8 @@ fun MovieScreen(
 
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(vertical = 16.dp)) {
                     Button(
-                        onClick = { onPlay(recent?.toPlayTarget() ?: item.toPlayTarget()) },
+                        // URL ACTUELLE du catalogue + position mémorisée (l'URL stockée dans le récent peut être périmée).
+                        onClick = { onPlay(item.toPlayTarget().copy(startPositionMs = recent?.positionMs ?: 0L)) },
                         modifier = Modifier.focusRequester(playFocus).onFocusChanged { playFocused = it.isFocused },
                     ) {
                         Text(if (recent != null) "▶ Reprendre (${(recent.progress * 100).toInt()} %)" else "▶ Lire")

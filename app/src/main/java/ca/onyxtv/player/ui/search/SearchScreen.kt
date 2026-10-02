@@ -24,6 +24,10 @@ import ca.onyxtv.player.core.model.VodItem
 import ca.onyxtv.player.player.PlayTarget
 import ca.onyxtv.player.ui.components.MediaCard
 import ca.onyxtv.player.ui.components.toPlayTarget
+import ca.onyxtv.player.ui.components.ContextMenuRequest
+import ca.onyxtv.player.ui.components.LocalContextMenu
+import ca.onyxtv.player.ui.components.MenuAction
+import ca.onyxtv.player.ui.components.vodMenu
 import ca.onyxtv.player.ui.theme.OnyxMuted
 import ca.onyxtv.player.viewmodel.OnyxViewModel
 import ca.onyxtv.player.viewmodel.hiddenGroups
@@ -51,6 +55,8 @@ fun SearchScreen(
     val hidden = hiddenGroups(parental, unlocked)
     val query by vm.searchQuery.collectAsStateWithLifecycle()
     val (chanHits, vodHits) = vm.searchResults.collectAsStateWithLifecycle().value
+    val favorites by vm.favorites.collectAsStateWithLifecycle()
+    val showMenu = LocalContextMenu.current
 
     // Le filtrage lourd est fait dans le ViewModel (arrière-plan, anti-rebond) ; ici on ne met
     // en forme qu'au plus 120 résultats.
@@ -113,6 +119,21 @@ fun SearchScreen(
                         badge = hit.badge,
                         onClick = {
                             hit.series?.let(onOpenDetail) ?: hit.target?.let(onPlay)
+                        },
+                        onLongClick = {
+                            val v = hit.series
+                            if (v != null) showMenu(vodMenu(v, v.id in favorites, openDetail = { onOpenDetail(v) }, play = { onPlay(v.toPlayTarget()) }, toggleFavorite = { vm.toggleFavorite(v.id) }))
+                            else hit.target?.let { t ->
+                                showMenu(
+                                    ContextMenuRequest(
+                                        title = hit.title, subtitle = hit.subtitle,
+                                        actions = listOf(
+                                            MenuAction(if (hit.seed in favorites) "★ Retirer des favoris" else "☆ Ajouter aux favoris") { vm.toggleFavorite(hit.seed) },
+                                            MenuAction("▶ Regarder") { onPlay(t) },
+                                        ),
+                                    )
+                                )
+                            }
                         },
                     )
                 }

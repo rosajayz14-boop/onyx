@@ -129,8 +129,10 @@ fun MediaCard(
     progress: Float? = null,
     /** Petit badge en haut à gauche (ex. « ★ », « DIRECT »). */
     badge: String? = null,
+    /** Appui long sur OK (menu contextuel : favoris, retirer des récents…). */
+    onLongClick: (() -> Unit)? = null,
 ) {
-    Card(onClick = onClick, modifier = modifier.width(width)) {
+    Card(onClick = onClick, onLongClick = onLongClick, modifier = modifier.width(width)) {
         Column {
             Box(
                 Modifier

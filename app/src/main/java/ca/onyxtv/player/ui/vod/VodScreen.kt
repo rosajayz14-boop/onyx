@@ -31,6 +31,8 @@ import ca.onyxtv.player.player.PlayTarget
 import ca.onyxtv.player.ui.components.EmptyState
 import ca.onyxtv.player.ui.components.LoadingState
 import ca.onyxtv.player.ui.components.MediaCard
+import ca.onyxtv.player.ui.components.LocalContextMenu
+import ca.onyxtv.player.ui.components.vodMenu
 import ca.onyxtv.player.ui.components.toPlayTarget
 import ca.onyxtv.player.ui.theme.OnyxCyan
 import ca.onyxtv.player.ui.theme.OnyxMuted
@@ -45,6 +47,7 @@ fun VodScreen(
 ) {
     val state by vm.state.collectAsStateWithLifecycle()
     val favorites by vm.favorites.collectAsStateWithLifecycle()
+    val showMenu = LocalContextMenu.current
     val recents by vm.recents.collectAsStateWithLifecycle()
     val parental by vm.parental.collectAsStateWithLifecycle()
     val unlocked by vm.unlockedGroups.collectAsStateWithLifecycle()
@@ -127,6 +130,9 @@ fun VodScreen(
                         else -> null
                     },
                     onClick = { onOpenDetail(v) },
+                    onLongClick = {
+                        showMenu(vodMenu(v, v.id in favorites, openDetail = { onOpenDetail(v) }, play = { onPlay(v.toPlayTarget()) }, toggleFavorite = { vm.toggleFavorite(v.id) }))
+                    },
                 )
             }
         }

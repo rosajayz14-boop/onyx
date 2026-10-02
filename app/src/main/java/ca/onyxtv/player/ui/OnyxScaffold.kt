@@ -28,6 +28,8 @@ import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Today
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -47,6 +49,7 @@ import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.nativeKeyEvent
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalFocusManager
@@ -63,6 +66,9 @@ import ca.onyxtv.player.core.model.MediaKind
 import ca.onyxtv.player.core.model.VodItem
 import ca.onyxtv.player.player.PlayTarget
 import ca.onyxtv.player.player.PlayerScreen
+import ca.onyxtv.player.ui.components.ContextMenuOverlay
+import ca.onyxtv.player.ui.components.ContextMenuRequest
+import ca.onyxtv.player.ui.components.LocalContextMenu
 import ca.onyxtv.player.ui.components.PinDialog
 import ca.onyxtv.player.ui.components.toPlayTarget
 import ca.onyxtv.player.ui.dvr.DvrScreen
@@ -101,6 +107,10 @@ fun OnyxRoot(vm: OnyxViewModel = viewModel()) {
     var dest by remember { mutableStateOf(Dest.HOME) }
     var playing by remember { mutableStateOf<PlayTarget?>(null) }
     var openDetail by remember { mutableStateOf<VodItem?>(null) }
+    // Menu contextuel (appui long sur OK) : dessiné par-dessus, piloté par les touches ci-dessous.
+    var contextMenu by remember { mutableStateOf<ContextMenuRequest?>(null) }
+    var menuIndex by remember { mutableIntStateOf(0) }
+    var menuOkArmed by remember { mutableStateOf(false) }
 
     // Verrouillage de l'application au démarrage (contrôle parental).
     val parental by vm.parental.collectAsStateWithLifecycle()
@@ -141,7 +151,7 @@ fun OnyxRoot(vm: OnyxViewModel = viewModel()) {
     LaunchedEffect(prefs.resumeOnStart, recents) {
         if (!autoResumed && prefs.resumeOnStart && recents.isNotEmpty()) {
             autoResumed = true
-            playing = recents.first().toPlayTarget()
+            playing = vm.freshTarget(recents.first())
         }
     }
 
@@ -166,7 +176,7 @@ fun OnyxRoot(vm: OnyxViewModel = viewModel()) {
     val focusManager = LocalFocusManager.current
     var railHasFocus by remember { mutableStateOf(false) }
     var contentHasFocus by remember { mutableStateOf(false) }
-    val overlayOpen = playing != null || openDetail != null
+    val overlayOpen = playing != null || openDetail != null || contextMenu != null
 
     // Reprise du focus dès que rien n'est sélectionné (démarrage, fin du chargement, fermeture
     // d'une fiche/du lecteur, changement de page). On vise le contenu, avec repli sur le menu.
@@ -209,10 +219,37 @@ fun OnyxRoot(vm: OnyxViewModel = viewModel()) {
 
     val railWidth by animateDpAsState(if (railHasFocus) 232.dp else 84.dp, label = "rail")
 
+    CompositionLocalProvider(LocalContextMenu provides { req -> menuIndex = 0; menuOkArmed = false; contextMenu = req }) {
     Box(
         Modifier
             .fillMaxSize()
             .background(OnyxBg)
+            // Menu contextuel : on intercepte les touches AVANT l'élément focalisé (qui garde son
+            // focus : à la fermeture, rien n'est perdu). ▲ ▼ choisir, OK valider, Retour annuler.
+            .onPreviewKeyEvent { ev ->
+                val menu = contextMenu ?: return@onPreviewKeyEvent false
+                val isOk = ev.key == Key.DirectionCenter || ev.key == Key.Enter || ev.key == Key.NumPadEnter
+                when {
+                    isOk && ev.type == KeyEventType.KeyDown -> {
+                        if (ev.nativeKeyEvent.repeatCount == 0) menuOkArmed = true
+                        true
+                    }
+                    isOk && ev.type == KeyEventType.KeyUp -> {
+                        // Relâchement de l'appui long qui a OUVERT le menu : il doit atteindre la
+                        // carte (elle remet son état « appui long » à zéro), on ne l'exploite pas.
+                        if (!menuOkArmed) return@onPreviewKeyEvent false
+                        menuOkArmed = false
+                        contextMenu = null
+                        menu.actions.getOrNull(menuIndex)?.run?.invoke()
+                        true
+                    }
+                    ev.type != KeyEventType.KeyDown -> true
+                    ev.key == Key.DirectionDown -> { menuIndex = (menuIndex + 1) % menu.actions.size; true }
+                    ev.key == Key.DirectionUp -> { menuIndex = (menuIndex - 1 + menu.actions.size) % menu.actions.size; true }
+                    ev.key == Key.Back || ev.key == Key.Escape -> { contextMenu = null; true }
+                    else -> true
+                }
+            }
     ) {
         Row(Modifier.fillMaxSize()) {
             // ---- Barre latérale (menu) ----
@@ -348,6 +385,9 @@ fun OnyxRoot(vm: OnyxViewModel = viewModel()) {
                 )
             }
         }
+
+        contextMenu?.let { ContextMenuOverlay(it, menuIndex) }
+    }
     }
 }
 

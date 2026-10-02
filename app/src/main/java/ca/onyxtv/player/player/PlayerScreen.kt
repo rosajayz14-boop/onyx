@@ -49,6 +49,15 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.media3.common.C
+import androidx.media3.common.Format
+import androidx.media3.common.MimeTypes
+import androidx.media3.exoplayer.analytics.AnalyticsListener
+import androidx.media3.exoplayer.mediacodec.MediaCodecUtil
+import androidx.media3.extractor.DefaultExtractorsFactory
+import androidx.compose.runtime.key
+import android.view.LayoutInflater
+import ca.onyxtv.player.R
+import ca.onyxtv.player.core.net.StreamProbe
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
@@ -82,6 +91,43 @@ data class PlayTarget(
     /** Contenu à enchaîner automatiquement à la fin (épisode suivant), null sinon. */
     val next: PlayTarget? = null,
 )
+
+/**
+ * Lecteur ExoPlayer. [preferSoftware] : décodeurs logiciels (c2.android.* / OMX.google.*) d'abord,
+ * repli quand le décodeur matériel du boîtier rend une image noire (HEVC 10 bits, Dolby Vision…).
+ */
+@OptIn(UnstableApi::class)
+private fun buildPlayer(context: android.content.Context, preferSoftware: Boolean): ExoPlayer {
+    // Les serveurs Xtream redirigent souvent http -> https : refusé par défaut (=> erreur de lecture).
+    // L'UA « ExoPlayerLib » est bloqué par certains panneaux.
+    val http = androidx.media3.datasource.DefaultHttpDataSource.Factory()
+        .setUserAgent("ONYX-TV/1.0 (Android TV)")
+        .setAllowCrossProtocolRedirects(true)
+        .setConnectTimeoutMs(15_000)
+        .setReadTimeoutMs(20_000)
+    val renderers = androidx.media3.exoplayer.DefaultRenderersFactory(context).setEnableDecoderFallback(true)
+    if (preferSoftware) {
+        renderers.setMediaCodecSelector { mimeType, requiresSecureDecoder, requiresTunnelingDecoder ->
+            MediaCodecUtil.getDecoderInfos(mimeType, requiresSecureDecoder, requiresTunnelingDecoder)
+                .sortedBy { if (it.hardwareAccelerated) 1 else 0 }
+        }
+    }
+    // Fichiers VOD en .ts / .mp3 sans index : avance/recul possibles grâce au débit constant.
+    val extractors = DefaultExtractorsFactory().setConstantBitrateSeekingEnabled(true)
+    return ExoPlayer.Builder(context, renderers)
+        .setMediaSourceFactory(
+            androidx.media3.exoplayer.source.DefaultMediaSourceFactory(
+                androidx.media3.datasource.DefaultDataSource.Factory(context, http),
+                extractors,
+            ).setLoadErrorHandlingPolicy(androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy(6)),
+        )
+        .setAudioAttributes(
+            androidx.media3.common.AudioAttributes.Builder()
+                .setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MOVIE).build(),
+            true,
+        )
+        .build().apply { playWhenReady = true }
+}
 
 private fun fmtClock(ms: Long): String {
     val s = ms / 1000
@@ -138,30 +184,12 @@ fun PlayerScreen(
     seekForwardSeconds: Int = 30,
 ) {
     val context = LocalContext.current
-    val exo = remember {
-        // Les serveurs Xtream redirigent souvent http -> https : refusé par défaut (=> erreur de lecture).
-        // L'UA « ExoPlayerLib » est bloqué par certains panneaux. Décodeur logiciel de repli.
-        val http = androidx.media3.datasource.DefaultHttpDataSource.Factory()
-            .setUserAgent("ONYX-TV/1.0 (Android TV)")
-            .setAllowCrossProtocolRedirects(true)
-            .setConnectTimeoutMs(15_000)
-            .setReadTimeoutMs(20_000)
-        ExoPlayer.Builder(
-            context,
-            androidx.media3.exoplayer.DefaultRenderersFactory(context).setEnableDecoderFallback(true),
-        )
-            .setMediaSourceFactory(
-                androidx.media3.exoplayer.source.DefaultMediaSourceFactory(context)
-                    .setDataSourceFactory(androidx.media3.datasource.DefaultDataSource.Factory(context, http))
-                    .setLoadErrorHandlingPolicy(androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy(6)),
-            )
-            .setAudioAttributes(
-                androidx.media3.common.AudioAttributes.Builder()
-                    .setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MOVIE).build(),
-                true,
-            )
-            .build().apply { playWhenReady = true }
-    }
+    // Repli « image noire » : rendu TextureView, puis décodeur LOGICIEL (nouveau lecteur).
+    var textureView by remember { mutableStateOf(false) }
+    var softwareDecoder by remember { mutableStateOf(false) }
+    var playerGen by remember { mutableIntStateOf(0) }
+    var reloadAtMs by remember { mutableStateOf(-1L) }
+    val exo = remember(playerGen) { buildPlayer(context, softwareDecoder) }
     val focus = remember { FocusRequester() }
     val panelFocus = remember { FocusRequester() }
 
@@ -181,6 +209,15 @@ fun PlayerScreen(
     var playerView by remember { mutableStateOf<PlayerView?>(null) }
     var liveRetries by remember { mutableIntStateOf(0) }
     val overlayFocus = remember { FocusRequester() }
+    // Diagnostic du flux (ce que le serveur renvoie vraiment, codecs, décodeur, première image).
+    var probe by remember { mutableStateOf<StreamProbe.Result?>(null) }
+    var videoFmt by remember { mutableStateOf<Format?>(null) }
+    var audioFmt by remember { mutableStateOf<Format?>(null) }
+    var decoder by remember { mutableStateOf<String?>(null) }
+    var firstFrame by remember { mutableStateOf(false) }
+    var readyAt by remember { mutableStateOf(0L) }
+    var noPicture by remember { mutableStateOf(false) }
+    var fallbackNote by remember { mutableStateOf<String?>(null) }
     val scope = androidx.compose.runtime.rememberCoroutineScope()
 
     // Fenêtre « générique » (3 dernières minutes) pour la VOD : ▲ lance l'épisode suivant.
@@ -199,13 +236,88 @@ fun PlayerScreen(
         return true
     }
 
-    fun load() {
+    suspend fun load() {
         error = null
         buffering = true
-        exo.setMediaItem(MediaItem.fromUri(target.url))
+        firstFrame = false; readyAt = 0L; noPicture = false
+        val startMs = if (reloadAtMs >= 0) reloadAtMs else target.startPositionMs
+        reloadAtMs = -1L
+        var item = MediaItem.fromUri(target.url)
+        if (!target.isLive) {
+            // VOD : on regarde d'abord ce que le serveur renvoie VRAIMENT (redirection, HLS, page
+            // HTML, 403…). Sinon ExoPlayer joue n'importe quoi en silence (écran noir, « film » de
+            // quelques minutes = vidéo d'erreur du panneau) ou échoue avec un code obscur.
+            val p = StreamProbe.probe(target.url)
+            probe = p
+            if (p != null) {
+                val blocking = when {
+                    p.code == 401 || p.code == 403 -> "Le serveur refuse ce film (HTTP ${p.code}) : identifiants ou abonnement non autorisés pour la VOD."
+                    p.code == 404 -> "Film introuvable sur le serveur (HTTP 404) : fichier retiré ou adresse changée. Réglages → « Tout mettre à jour »."
+                    p.code >= 400 -> "Erreur du serveur (HTTP ${p.code})."
+                    p.kind == StreamProbe.Kind.HTML -> "Le serveur renvoie une page (${p.contentType?.substringBefore(';') ?: "texte"}) au lieu de la vidéo : VOD inactive sur ce compte ou lien expiré."
+                    else -> null
+                }
+                if (blocking != null) { buffering = false; error = blocking; return }
+                item = MediaItem.Builder().setUri(p.finalUrl)
+                    .apply { if (p.kind == StreamProbe.Kind.HLS) setMimeType(MimeTypes.APPLICATION_M3U8) }
+                    .build()
+            }
+        }
+        exo.setMediaItem(item)
         exo.prepare()
-        if (!target.isLive && target.startPositionMs > 0) exo.seekTo(target.startPositionMs)
+        if (!target.isLive && startMs > 0) exo.seekTo(startMs)
         exo.play()
+    }
+
+    fun fmtVideo(f: Format?): String {
+        if (f == null) return "?"
+        val codec = when (f.sampleMimeType) {
+            MimeTypes.VIDEO_H264 -> "H.264"
+            MimeTypes.VIDEO_H265 -> "HEVC (H.265)"
+            MimeTypes.VIDEO_VP9 -> "VP9"
+            MimeTypes.VIDEO_AV1 -> "AV1"
+            MimeTypes.VIDEO_MP4V -> "MPEG-4"
+            MimeTypes.VIDEO_MPEG2 -> "MPEG-2"
+            MimeTypes.VIDEO_DOLBY_VISION -> "Dolby Vision"
+            else -> f.sampleMimeType ?: "?"
+        }
+        val size = if (f.width > 0 && f.height > 0) " ${f.width}×${f.height}" else ""
+        val extra = f.codecs?.let { " ($it)" } ?: ""
+        return codec + size + extra
+    }
+
+    fun fmtAudio(f: Format?): String {
+        if (f == null) return "?"
+        val codec = when (f.sampleMimeType) {
+            MimeTypes.AUDIO_AAC -> "AAC"; MimeTypes.AUDIO_AC3 -> "AC-3"; MimeTypes.AUDIO_E_AC3 -> "E-AC-3"
+            MimeTypes.AUDIO_MPEG -> "MP3"; MimeTypes.AUDIO_DTS -> "DTS"; MimeTypes.AUDIO_TRUEHD -> "TrueHD"
+            MimeTypes.AUDIO_OPUS -> "Opus"; MimeTypes.AUDIO_FLAC -> "FLAC"
+            else -> f.sampleMimeType ?: "?"
+        }
+        return codec + (if (f.channelCount > 0) " ${f.channelCount}ch" else "")
+    }
+
+    /** Résumé technique du flux (panneau, erreurs) : serveur, codecs, décodeur, durée. */
+    fun streamInfo(): String = buildString {
+        probe?.let { append(it.summary()).append('\n') }
+        append("vidéo ").append(fmtVideo(videoFmt))
+        append(" · audio ").append(fmtAudio(audioFmt))
+        decoder?.let { append("\ndécodeur ").append(it) }
+        if (softwareDecoder) append(" (logiciel)")
+        if (textureView) append(" · rendu TextureView")
+        if (durMs > 0) append(" · durée ").append(fmtClock(durMs))
+        if (!firstFrame && readyAt > 0) append(" · AUCUNE IMAGE")
+    }
+
+    /** Pourquoi l'écran reste noir, en clair. */
+    fun pictureDiagnosis(): String {
+        val vGroups = tracks.groups.filter { it.type == C.TRACK_TYPE_VIDEO }
+        return when {
+            vGroups.isEmpty() -> "Ce fichier ne contient aucune piste vidéo lisible (fichier audio ou vidéo d'erreur du serveur)."
+            vGroups.none { g -> (0 until g.length).any { g.isTrackSupported(it) } } ->
+                "Vidéo ${fmtVideo(vGroups.first().getTrackFormat(0))} : aucun décodeur sur ce boîtier."
+            else -> "Le décodeur ${decoder ?: "matériel"} ne produit aucune image pour ${fmtVideo(videoFmt)} (souvent HEVC 10 bits / Dolby Vision)."
+        }
     }
 
     fun seekBy(deltaMs: Long) {
@@ -260,8 +372,10 @@ fun PlayerScreen(
                 }
                 return true
             }
+            override fun onRenderedFirstFrame() { firstFrame = true; noPicture = false }
             override fun onPlaybackStateChanged(playbackState: Int) {
                 buffering = playbackState == Player.STATE_BUFFERING
+                if (playbackState == Player.STATE_READY && readyAt == 0L) readyAt = System.currentTimeMillis()
                 if (playbackState == Player.STATE_ENDED) {
                     if (currentTarget.isLive) reconnectLive() else ended = true
                 }
@@ -269,7 +383,7 @@ fun PlayerScreen(
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 if (isPlaying) { error = null; liveRetries = 0 }
             }
-            override fun onTracksChanged(t: Tracks) { tracks = t }
+            override fun onTracksChanged(t: Tracks) { tracks = t; videoFmt = exo.videoFormat; audioFmt = exo.audioFormat }
             override fun onPlayerError(e: PlaybackException) {
                 // HLS direct : décroché de la fenêtre live -> on se recale sans erreur.
                 if (e.errorCode == PlaybackException.ERROR_CODE_BEHIND_LIVE_WINDOW) {
@@ -300,9 +414,16 @@ fun PlayerScreen(
                 }
             }
         }
+        val analytics = object : AnalyticsListener {
+            override fun onVideoDecoderInitialized(eventTime: AnalyticsListener.EventTime, decoderName: String, initializedTimestampMs: Long, initializationDurationMs: Long) {
+                decoder = decoderName
+            }
+        }
         exo.addListener(listener)
+        exo.addAnalyticsListener(analytics)
         onDispose {
             exo.removeListener(listener)
+            exo.removeAnalyticsListener(analytics)
             exo.release()
         }
     }
@@ -332,11 +453,11 @@ fun PlayerScreen(
     }
 
     // (Re)chargement à chaque changement de cible, avec bandeau d'info temporaire.
-    LaunchedEffect(target.url) {
+    LaunchedEffect(exo, target.url) {
         ended = false
-        load()
         panelOpen = false
         showInfo = true
+        load()
         delay(5_000)
         showInfo = false
     }
@@ -366,16 +487,36 @@ fun PlayerScreen(
     }
 
     // Position courante (fenêtres intro / générique, affichage).
-    LaunchedEffect(target.url) {
+    LaunchedEffect(exo, target.url) {
         while (isActive) {
             posMs = exo.currentPosition
             durMs = exo.duration.takeIf { it != C.TIME_UNSET } ?: 0L
+            // Chien de garde « image noire » : prêt depuis 7 s, lecture lancée, aucune image rendue.
+            // Repli automatique UNE fois par étape : rendu TextureView, puis décodeur logiciel ;
+            // ensuite on explique clairement (codec, décodeur) au lieu de laisser l'écran noir.
+            if (!firstFrame && error == null && readyAt > 0 && exo.playWhenReady &&
+                exo.playbackState == Player.STATE_READY && System.currentTimeMillis() - readyAt > 7_000) {
+                when {
+                    !textureView -> {
+                        textureView = true; readyAt = System.currentTimeMillis()
+                        fallbackNote = "Aucune image : passage au rendu TextureView…"
+                    }
+                    !softwareDecoder -> {
+                        reloadAtMs = exo.currentPosition
+                        softwareDecoder = true; readyAt = 0L
+                        fallbackNote = "Toujours aucune image : essai du décodeur logiciel…"
+                        playerGen++
+                    }
+                    else -> { noPicture = true; fallbackNote = null }
+                }
+            }
             delay(1_000)
         }
     }
+    LaunchedEffect(fallbackNote) { if (fallbackNote != null) { delay(6_000); fallbackNote = null } }
     LaunchedEffect(seekNote) { if (seekNote != null) { delay(1_800); seekNote = null } }
 
-    LaunchedEffect(target.url) {
+    LaunchedEffect(exo, target.url) {
         while (isActive) {
             delay(5_000)
             runCatching { report(target) }
@@ -384,7 +525,7 @@ fun PlayerScreen(
     // Dernière remontée à la sortie : on CAPTURE la cible de cet effet. Avec currentTarget, au
     // zapping ou à l'épisode suivant, la position de l'ANCIEN élément était enregistrée sous
     // l'id du NOUVEAU (épisode suivant marqué « vu », reprise au mauvais endroit).
-    DisposableEffect(target.url) {
+    DisposableEffect(exo, target.url) {
         val captured = target
         onDispose { runCatching { report(captured) } }
     }
@@ -450,10 +591,11 @@ fun PlayerScreen(
                 }
             }
     ) {
-        AndroidView(
+        key(textureView) { AndroidView(
             modifier = Modifier.fillMaxSize(),
             factory = { ctx ->
-                PlayerView(ctx).apply {
+                val view = if (textureView) LayoutInflater.from(ctx).inflate(R.layout.player_texture, null) as PlayerView else PlayerView(ctx)
+                view.apply {
                     player = exo
                     keepScreenOn = true   // empêche la veille pendant la lecture
                     // La barre native est AFFICHAGE SEULEMENT. Sinon, à chaque apparition, elle appelle
@@ -477,7 +619,7 @@ fun PlayerScreen(
                 if (view.resizeMode != resize) view.resizeMode = resize
             },
             onRelease = { it.player = null },
-        )
+        ) }
 
         // Bandeau d'information (titre / catégorie / programme en cours), masqué après quelques secondes.
         AnimatedVisibility(
@@ -518,8 +660,27 @@ fun PlayerScreen(
         val hint = when {
             ended || error != null || panelOpen -> null
             seekNote != null -> seekNote
+            fallbackNote != null -> fallbackNote
             inCredits -> "▲ Passer le générique → épisode suivant"
             else -> null
+        }
+
+        // Écran noir malgré tout : on dit POURQUOI (codec, décodeur, réponse du serveur).
+        if (noPicture && error == null && !ended && !panelOpen) {
+            Column(
+                Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(start = 28.dp, bottom = 96.dp, end = 120.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Color(0xE60B0C14))
+                    .padding(18.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Text("Aucune image", style = MaterialTheme.typography.titleLarge, color = OnyxLive)
+                Text(pictureDiagnosis(), style = MaterialTheme.typography.bodyLarge, color = Color.White)
+                Text(streamInfo(), style = MaterialTheme.typography.bodySmall, color = OnyxMuted)
+                Text("▲ ou OK long : panneau (rendu, décodeur, pistes)", style = MaterialTheme.typography.bodySmall, color = OnyxCyan)
+            }
         }
         hint?.let {
             Text(
@@ -611,6 +772,19 @@ fun PlayerScreen(
                     }
                 }
 
+                Text("Image noire ?", style = MaterialTheme.typography.titleMedium, color = OnyxCyan, modifier = Modifier.padding(top = 8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = { textureView = !textureView; readyAt = System.currentTimeMillis(); noPicture = false }) {
+                        Text(if (textureView) "Rendu : TextureView" else "Rendu : SurfaceView")
+                    }
+                    Button(onClick = {
+                        reloadAtMs = exo.currentPosition; softwareDecoder = !softwareDecoder; noPicture = false; playerGen++
+                    }) { Text(if (softwareDecoder) "Décodeur : logiciel" else "Décodeur : auto") }
+                }
+
+                Text("Infos flux", style = MaterialTheme.typography.titleMedium, color = OnyxCyan, modifier = Modifier.padding(top = 8.dp))
+                Text(streamInfo(), color = OnyxMuted, style = MaterialTheme.typography.bodySmall)
+
                 Text("Retour ou Menu pour fermer", color = OnyxMuted, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 12.dp))
             }
         }
@@ -653,8 +827,9 @@ fun PlayerScreen(
             ) {
                 Text("Lecture interrompue", style = MaterialTheme.typography.headlineMedium, color = Color.White)
                 Text(msg, style = MaterialTheme.typography.bodyLarge, color = OnyxMuted)
+                Text(streamInfo(), style = MaterialTheme.typography.bodySmall, color = OnyxMuted)
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Button(onClick = { load() }, modifier = Modifier.focusRequester(overlayFocus)) { Text("Réessayer") }
+                    Button(onClick = { scope.launch { load() } }, modifier = Modifier.focusRequester(overlayFocus)) { Text("Réessayer") }
                     if (target.isLive && zap != null) Button(onClick = { doZap(+1) }) { Text("Chaîne suivante") }
                     Button(onClick = onExit) { Text("Retour") }
                 }

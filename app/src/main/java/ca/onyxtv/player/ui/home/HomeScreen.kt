@@ -29,6 +29,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.tv.material3.Button
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
+import ca.onyxtv.player.core.model.Channel
 import ca.onyxtv.player.core.model.VodItem
 import ca.onyxtv.player.player.PlayTarget
 import ca.onyxtv.player.ui.components.EmptyState
@@ -37,6 +38,10 @@ import ca.onyxtv.player.ui.components.LoadingState
 import ca.onyxtv.player.ui.components.MediaCard
 import ca.onyxtv.player.ui.components.Rail
 import ca.onyxtv.player.ui.components.toPlayTarget
+import ca.onyxtv.player.ui.components.LocalContextMenu
+import ca.onyxtv.player.ui.components.MenuAction
+import ca.onyxtv.player.ui.components.channelMenu
+import ca.onyxtv.player.ui.components.vodMenu
 import ca.onyxtv.player.ui.theme.OnyxCyan
 import ca.onyxtv.player.ui.theme.OnyxMuted
 import ca.onyxtv.player.viewmodel.OnyxViewModel
@@ -53,6 +58,7 @@ fun HomeScreen(
 ) {
     // Un film comme une série s'ouvre sur sa fiche (résumé, casting, bande-annonce / épisodes).
     val openVod: (VodItem) -> Unit = { v -> onOpenDetail(v) }
+    val showMenu = LocalContextMenu.current
     val state by vm.state.collectAsStateWithLifecycle()
     val favorites by vm.favorites.collectAsStateWithLifecycle()
     val recents by vm.recents.collectAsStateWithLifecycle()
@@ -91,6 +97,13 @@ fun HomeScreen(
 
     val resumable = remember(recents) { recents.filter { it.resumable } }
     val favChannels = remember(channels, favorites) { channels.filter { it.id in favorites } }
+    // Appui long sur une carte film/série : favoris en premier, puis fiche / lecture.
+    val vodLongPress: (VodItem) -> Unit = { v ->
+        showMenu(vodMenu(v, v.id in favorites, openDetail = { openVod(v) }, play = { onPlay(v.toPlayTarget()) }, toggleFavorite = { vm.toggleFavorite(v.id) }))
+    }
+    val channelLongPress: (Channel) -> Unit = { c ->
+        showMenu(channelMenu(c, c.id in favorites, play = { onPlay(c.toPlayTarget()) }, toggleFavorite = { vm.toggleFavorite(c.id) }))
+    }
     val favVod = remember(vod, favorites) { vod.filter { it.id in favorites } }
     val recommendedAll by vm.recommended.collectAsStateWithLifecycle()
     val recommended = remember(recommendedAll, hidden) { recommendedAll.filterNot { it.category in hidden } }
@@ -114,7 +127,7 @@ fun HomeScreen(
     val heroImage = heroResume?.imageUrl ?: heroVod?.posterUrl
     val heroAction: () -> Unit = {
         when {
-            heroResume != null -> onPlay(heroResume.toPlayTarget())
+            heroResume != null -> onPlay(vm.freshTarget(heroResume))
             heroVod != null -> openVod(heroVod)
             else -> channels.firstOrNull()?.let { onPlay(it.toPlayTarget()) }
         }
@@ -178,7 +191,21 @@ fun HomeScreen(
                             initials = r.title.take(2).uppercase(),
                             progress = if (r.resumable) r.progress else null,
                             badge = if (r.live) "DIRECT" else null,
-                            onClick = { onPlay(r.toPlayTarget()) },
+                            onClick = { onPlay(vm.freshTarget(r)) },
+                            onLongClick = {
+                                val inCatalog = vod.firstOrNull { it.id == r.id } ?: channels.firstOrNull { it.id == r.id }
+                                showMenu(
+                                    ca.onyxtv.player.ui.components.ContextMenuRequest(
+                                        title = r.title, subtitle = r.subtitle,
+                                        actions = buildList {
+                                            add(MenuAction("✕ Retirer de « Reprendre »") { vm.removeRecent(r.id) })
+                                            if (inCatalog != null) add(MenuAction(if (r.id in favorites) "★ Retirer des favoris" else "☆ Ajouter aux favoris") { vm.toggleFavorite(r.id) })
+                                            add(MenuAction(if (r.resumable) "▶ Reprendre" else "▶ Lire") { onPlay(vm.freshTarget(r)) })
+                                            if (r.resumable) add(MenuAction("↺ Depuis le début") { onPlay(vm.freshTarget(r).copy(startPositionMs = 0L)) })
+                                        },
+                                    )
+                                )
+                            },
                         )
                     }
                 }
@@ -196,6 +223,7 @@ fun HomeScreen(
                             initials = c.name.take(2).uppercase(),
                             badge = "DIRECT",
                             onClick = { onPlay(c.toPlayTarget()) },
+                            onLongClick = { channelLongPress(c) },
                         )
                     }
                     items(favVod, key = { "v" + it.id }) { v ->
@@ -208,6 +236,7 @@ fun HomeScreen(
                             aspectRatio = 2f / 3f,
                             initials = v.name.take(1).uppercase(),
                             onClick = { openVod(v) },
+                            onLongClick = { vodLongPress(v) },
                         )
                     }
                 }
@@ -224,6 +253,7 @@ fun HomeScreen(
                             seed = c.id,
                             initials = c.name.take(2).uppercase(),
                             onClick = { onPlay(c.toPlayTarget()) },
+                            onLongClick = { channelLongPress(c) },
                         )
                     }
                 }
@@ -242,6 +272,7 @@ fun HomeScreen(
                             aspectRatio = 2f / 3f,
                             initials = v.name.take(1).uppercase(),
                             onClick = { openVod(v) },
+                            onLongClick = { vodLongPress(v) },
                         )
                     }
                 }
@@ -260,6 +291,7 @@ fun HomeScreen(
                             aspectRatio = 2f / 3f,
                             initials = v.name.take(1).uppercase(),
                             onClick = { openVod(v) },
+                            onLongClick = { vodLongPress(v) },
                         )
                     }
                 }
@@ -278,6 +310,7 @@ fun HomeScreen(
                             aspectRatio = 2f / 3f,
                             initials = v.name.take(1).uppercase(),
                             onClick = { openVod(v) },
+                            onLongClick = { vodLongPress(v) },
                         )
                     }
                 }
