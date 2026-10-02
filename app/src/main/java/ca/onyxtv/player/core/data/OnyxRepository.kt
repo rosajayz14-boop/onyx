@@ -242,17 +242,11 @@ class OnyxRepository(
                 if (r.isNotEmpty()) any++
                 r.firstOrNull { it.stop > nowTop }?.let { if (fut++ == 0) ex = "${c.name} → ${fmt.format(java.util.Date(it.start))} ${it.title}" }
             }
-            sb.append("═══ RÉSULTAT ═══
-")
-            sb.append("API panneau (get_short_epg) sur ${scan.size} chaînes : $any avec données · $fut à venir
-")
-            if (fut > 0) sb.append("✓ EPG en direct disponible — ex. $ex
-")
-            else sb.append("✗ Aucune chaîne n'a d'EPG à venir via l'API du panneau.
-")
-            sb.append("════════════════
-
-")
+            sb.append("\u2550\u2550\u2550 R\u00c9SULTAT \u2550\u2550\u2550\n")
+            sb.append("API panneau (get_short_epg) sur ${scan.size} cha\u00eenes : $any avec donn\u00e9es \u00b7 $fut \u00e0 venir\n")
+            if (fut > 0) sb.append("\u2713 EPG en direct disponible \u2014 ex. $ex\n")
+            else sb.append("\u2717 Aucune cha\u00eene n'a d'EPG \u00e0 venir via l'API du panneau.\n")
+            sb.append("\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\n\n")
         }
         // En-tête du M3U du compte : adresse du guide « officielle » du fournisseur.
         sources.filterIsInstance<PlaylistSource.Xtream>().forEach { src ->
