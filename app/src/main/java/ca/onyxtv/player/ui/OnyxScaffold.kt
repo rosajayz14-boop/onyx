@@ -110,6 +110,8 @@ fun OnyxRoot(vm: OnyxViewModel = viewModel()) {
     var contextMenu by remember { mutableStateOf<ContextMenuRequest?>(null) }
     var menuIndex by remember { mutableIntStateOf(0) }
     var menuOkArmed by remember { mutableStateOf(false) }
+    // Zap par numéro depuis Accueil / Direct / Guide (chiffres de la télécommande).
+    var zapDigits by remember { mutableStateOf("") }
 
     // Verrouillage de l'application au démarrage (contrôle parental).
     val parental by vm.parental.collectAsStateWithLifecycle()
@@ -148,6 +150,32 @@ fun OnyxRoot(vm: OnyxViewModel = viewModel()) {
     val state by vm.state.collectAsStateWithLifecycle()
     var autoResumed by remember { mutableStateOf(false) }
     val unlockedGroups by vm.unlockedGroups.collectAsStateWithLifecycle()
+
+    // Numéro tapé hors lecteur : on zappe 1,5 s après le dernier chiffre.
+    LaunchedEffect(zapDigits) {
+        if (zapDigits.isEmpty()) return@LaunchedEffect
+        delay(1_500)
+        val n = zapDigits.toIntOrNull()
+        zapDigits = ""
+        if (n != null) vm.channelByNumber(n)?.let { playing = it.toPlayTarget() }
+    }
+    // Chaîne précédente (rappel ◀ dans le lecteur).
+    LaunchedEffect(playing?.id, playing?.isLive) { playing?.takeIf { it.isLive }?.id?.let { vm.noteLive(it) } }
+    // Rappel de programme arrivé à échéance : dialogue « Regarder / Ignorer ».
+    val dueReminder by vm.dueReminder.collectAsStateWithLifecycle()
+    LaunchedEffect(dueReminder) {
+        val r = dueReminder ?: return@LaunchedEffect
+        menuIndex = 0; menuOkArmed = false
+        contextMenu = ContextMenuRequest(
+            title = "⏰ ${r.title}", subtitle = "commence sur ${r.channelName}",
+            actions = listOf(
+                ca.onyxtv.player.ui.components.MenuAction("▶ Regarder") { vm.channelById(r.channelId)?.let { playing = it.toPlayTarget() } },
+                ca.onyxtv.player.ui.components.MenuAction("Ignorer") {},
+            ),
+        )
+        vm.dismissDueReminder()
+    }
+
     LaunchedEffect(prefs.resumeOnStart, recents, state.hasContent) {
         // Attendre le catalogue (URL fraîche) et ignorer un contenu d'une catégorie verrouillée.
         if (!autoResumed && prefs.resumeOnStart && recents.isNotEmpty() && state.hasContent) {
@@ -234,6 +262,13 @@ fun OnyxRoot(vm: OnyxViewModel = viewModel()) {
             // Menu contextuel : on intercepte les touches AVANT l'élément focalisé (qui garde son
             // focus : à la fermeture, rien n'est perdu). ▲ ▼ choisir, OK valider, Retour annuler.
             .onPreviewKeyEvent { ev ->
+                if (contextMenu == null) {
+                    if (!overlayOpen && ev.type == KeyEventType.KeyDown && (dest == Dest.HOME || dest == Dest.LIVE || dest == Dest.GUIDE || dest == Dest.MOSAIC)) {
+                        val d = ca.onyxtv.player.player.DIGIT_KEYS[ev.key]
+                        if (d != null) { if (zapDigits.length < 4) zapDigits += d; return@onPreviewKeyEvent true }
+                    }
+                    return@onPreviewKeyEvent false
+                }
                 val menu = contextMenu ?: return@onPreviewKeyEvent false
                 if (menu.actions.isEmpty()) { contextMenu = null; return@onPreviewKeyEvent true }
                 val isOk = ev.key == Key.DirectionCenter || ev.key == Key.Enter || ev.key == Key.NumPadEnter
@@ -396,11 +431,21 @@ fun OnyxRoot(vm: OnyxViewModel = viewModel()) {
                     subtitleScale = prefs.subtitleScale,
                     subtitleBackground = prefs.subtitleBackground,
                     subtitleYellow = prefs.subtitleYellow,
+                    channelList = { vm.zapList() },
+                    previous = { vm.previousChannel()?.toPlayTarget() },
                 )
             }
         }
 
         contextMenu?.let { ContextMenuOverlay(it, menuIndex) }
+        if (zapDigits.isNotEmpty() && playing == null) {
+            Text(
+                zapDigits,
+                style = MaterialTheme.typography.displayLarge,
+                color = OnyxText,
+                modifier = Modifier.align(Alignment.TopEnd).padding(28.dp).clip(RoundedCornerShape(12.dp)).background(OnyxSurfaceHi).padding(horizontal = 22.dp, vertical = 8.dp),
+            )
+        }
     }
     }
 }

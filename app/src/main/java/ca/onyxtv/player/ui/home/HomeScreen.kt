@@ -45,6 +45,7 @@ import ca.onyxtv.player.ui.components.MenuAction
 import ca.onyxtv.player.ui.components.channelMenu
 import ca.onyxtv.player.ui.components.vodMenu
 import ca.onyxtv.player.ui.theme.OnyxCyan
+import ca.onyxtv.player.ui.theme.OnyxLive
 import ca.onyxtv.player.ui.theme.OnyxMuted
 import ca.onyxtv.player.viewmodel.OnyxViewModel
 import ca.onyxtv.player.viewmodel.hiddenGroups
@@ -69,9 +70,10 @@ fun HomeScreen(
     val parental by vm.parental.collectAsStateWithLifecycle()
     val unlocked by vm.unlockedGroups.collectAsStateWithLifecycle()
     val update by vm.update.collectAsStateWithLifecycle()
-    val hidden = hiddenGroups(parental, unlocked)
-    // Les catégories verrouillées (contrôle parental) n'apparaissent pas tant qu'elles ne sont pas déverrouillées.
-    val channels = remember(state.channels, hidden) { state.channels.filterNot { it.groupTitle in hidden } }
+    val prefs by vm.prefs.collectAsStateWithLifecycle()
+    val hidden = hiddenGroups(parental, unlocked) + prefs.hiddenCategories
+    // Les catégories verrouillées (contrôle parental) et les éléments masqués n'apparaissent pas.
+    val channels = remember(state.channels, hidden, prefs.hiddenChannelIds) { state.channels.filterNot { it.groupTitle in hidden || it.id in prefs.hiddenChannelIds } }
     val vod = remember(state.vod, hidden) { state.vod.filterNot { it.category in hidden } }
 
     if (state.loading && channels.isEmpty() && vod.isEmpty()) {
@@ -103,19 +105,30 @@ fun HomeScreen(
     val hiddenIdSet = remember(state.channels, state.vod, hidden) { hiddenIds(state.channels, state.vod, hidden) }
     val visibleRecents = remember(recents, hiddenIdSet) { if (hiddenIdSet.isEmpty()) recents else recents.filterNot { it.id in hiddenIdSet } }
     val resumable = remember(visibleRecents) { visibleRecents.filter { it.resumable } }
-    val favChannels = remember(channels, favorites) { channels.filter { it.id in favorites } }
+    // Favoris dans L'ORDRE choisi par l'utilisateur (menu appui long : Monter / Descendre).
+    val favChannels = remember(channels, favorites) { val byId = channels.associateBy { it.id }; favorites.mapNotNull { byId[it] } }
     // Appui long sur une carte film/série : favoris en premier, puis fiche / lecture.
     val vodLongPress: (VodItem) -> Unit = { v ->
-        showMenu(vodMenu(v, v.id in favorites, openDetail = { openVod(v) }, play = { onPlay(v.toPlayTarget()) }, toggleFavorite = { vm.toggleFavorite(v.id) }))
+        showMenu(vodMenu(v, v.id in favorites, openDetail = { openVod(v) }, play = { onPlay(v.toPlayTarget()) }, toggleFavorite = { vm.toggleFavorite(v.id) },
+            hideCategory = v.category?.let { cat -> { vm.hideCategory(cat, true) } }))
     }
     val channelLongPress: (Channel) -> Unit = { c ->
-        showMenu(channelMenu(c, c.id in favorites, play = { onPlay(c.toPlayTarget()) }, toggleFavorite = { vm.toggleFavorite(c.id) }))
+        showMenu(channelMenu(c, c.id in favorites, play = { onPlay(c.toPlayTarget()) }, toggleFavorite = { vm.toggleFavorite(c.id) },
+            hideChannel = { vm.hideChannel(c.id, true) }))
     }
-    val favVod = remember(vod, favorites) { vod.filter { it.id in favorites } }
+    // Rangée « Mes favoris » : en plus, réordonner.
+    fun moveActions(id: String) = listOf(
+        MenuAction("⬆ Monter") { vm.moveFavorite(id, -1) },
+        MenuAction("⬇ Descendre") { vm.moveFavorite(id, +1) },
+    )
+    val favVod = remember(vod, favorites) { val byId = vod.associateBy { it.id }; favorites.mapNotNull { byId[it] } }
     val recommendedAll by vm.recommended.collectAsStateWithLifecycle()
     val recommended = remember(recommendedAll, hidden) { recommendedAll.filterNot { it.category in hidden } }
     val tmdbAll by vm.tmdbSuggestions.collectAsStateWithLifecycle()
     val tmdb = remember(tmdbAll, hidden) { tmdbAll.filterNot { it.category in hidden } }
+    // Comptes qui expirent bientôt (bandeau d'alerte).
+    val accounts by vm.accounts.collectAsStateWithLifecycle()
+    val expiring = remember(accounts) { accounts.entries.filter { (it.value.daysLeft ?: 99) <= 7 } }
     // Les panneaux Xtream renvoient les films du plus ancien au plus récent : la fin de liste = derniers ajouts.
     val newMovies = remember(vod) { vod.asReversed().asSequence().filter { it.kind == MediaKind.MOVIE }.take(24).toList() }
 
@@ -168,8 +181,6 @@ fun HomeScreen(
                 )
             }
         }
-        val accounts by vm.accounts.collectAsStateWithLifecycle()
-        val expiring = accounts.entries.filter { (it.value.daysLeft ?: 99) <= 7 }
         if (expiring.isNotEmpty()) {
             item(key = "expiry") {
                 val labels = expiring.map { (id, a) -> (sources.firstOrNull { it.id == id }?.label ?: "Compte") to a }
@@ -246,7 +257,7 @@ fun HomeScreen(
                             initials = c.name.take(2).uppercase(),
                             badge = "DIRECT",
                             onClick = { onPlay(c.toPlayTarget()) },
-                            onLongClick = { channelLongPress(c) },
+                            onLongClick = { showMenu(channelMenu(c, true, play = { onPlay(c.toPlayTarget()) }, toggleFavorite = { vm.toggleFavorite(c.id) }, extra = moveActions(c.id))) },
                         )
                     }
                     items(favVod, key = { "v" + it.id }) { v ->
@@ -259,7 +270,7 @@ fun HomeScreen(
                             aspectRatio = 2f / 3f,
                             initials = v.name.take(1).uppercase(),
                             onClick = { openVod(v) },
-                            onLongClick = { vodLongPress(v) },
+                            onLongClick = { showMenu(vodMenu(v, true, openDetail = { openVod(v) }, play = { onPlay(v.toPlayTarget()) }, toggleFavorite = { vm.toggleFavorite(v.id) }, extra = moveActions(v.id))) },
                         )
                     }
                 }

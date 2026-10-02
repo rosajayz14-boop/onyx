@@ -151,7 +151,7 @@ private fun trackOptions(tracks: Tracks, type: Int): List<TrackOption> =
         }
     }
 
-private val DIGIT_KEYS = mapOf(
+internal val DIGIT_KEYS = mapOf(
     Key.Zero to '0', Key.One to '1', Key.Two to '2', Key.Three to '3', Key.Four to '4',
     Key.Five to '5', Key.Six to '6', Key.Seven to '7', Key.Eight to '8', Key.Nine to '9',
     Key.NumPad0 to '0', Key.NumPad1 to '1', Key.NumPad2 to '2', Key.NumPad3 to '3', Key.NumPad4 to '4',
@@ -185,6 +185,9 @@ fun PlayerScreen(
     subtitleScale: Float = 1f,
     subtitleBackground: Boolean = true,
     subtitleYellow: Boolean = false,
+    /** Liste des chaînes (superposition ▶ en direct) et chaîne précédente (◀). */
+    channelList: (() -> List<ca.onyxtv.player.core.model.Channel>)? = null,
+    previous: (() -> PlayTarget?)? = null,
 ) {
     val context = LocalContext.current
     // Repli « image noire » : rendu TextureView, puis décodeur LOGICIEL (nouveau lecteur).
@@ -230,6 +233,9 @@ fun PlayerScreen(
     var sleepAt by remember { mutableStateOf(0L) }
     var speed by remember { mutableStateOf(1f) }
     var sleepLeft by remember { mutableStateOf(0L) }
+    // Superposition « liste des chaînes » (direct, ▶).
+    var listOpen by remember { mutableStateOf(false) }
+    val listFocus = remember { FocusRequester() }
     val scope = androidx.compose.runtime.rememberCoroutineScope()
 
     // Fenêtre « générique » (3 dernières minutes) pour la VOD : ▲ lance l'épisode suivant.
@@ -593,6 +599,10 @@ fun PlayerScreen(
     LaunchedEffect(Unit) { repeat(10) { runCatching { focus.requestFocus() }; kotlinx.coroutines.delay(100) } }
     LaunchedEffect(panelOpen) {
         if (panelOpen) runCatching { panelFocus.requestFocus() }
+        else if (!listOpen) runCatching { if (error != null || ended) overlayFocus.requestFocus() else focus.requestFocus() }
+    }
+    LaunchedEffect(listOpen) {
+        if (listOpen) { delay(60); runCatching { listFocus.requestFocus() } }
         else runCatching { if (error != null || ended) overlayFocus.requestFocus() else focus.requestFocus() }
     }
     LaunchedEffect(error, ended) {
@@ -600,7 +610,7 @@ fun PlayerScreen(
         if (error != null || ended) runCatching { overlayFocus.requestFocus() } else runCatching { focus.requestFocus() }
     }
 
-    BackHandler(enabled = true) { if (panelOpen) panelOpen = false else onExit() }
+    BackHandler(enabled = true) { if (panelOpen) panelOpen = false else if (listOpen) listOpen = false else onExit() }
 
     Box(
         Modifier
@@ -613,10 +623,13 @@ fun PlayerScreen(
                 // audio, format). Beaucoup de télécommandes n'ont pas de touche Menu dédiée.
                 // Retour avec le panneau ouvert : fermer le panneau (sinon Compose « sort » du bouton
                 // vers la Box focalisable, consomme la touche, et les flèches sont mortes jusqu'à OK).
-                if (ev.key == Key.Back && panelOpen) {
-                    if (ev.type == KeyEventType.KeyUp) panelOpen = false
+                if (ev.key == Key.Back && (panelOpen || listOpen)) {
+                    if (ev.type == KeyEventType.KeyUp) { panelOpen = false; listOpen = false }
                     return@onPreviewKeyEvent true
                 }
+                // Liste des chaînes ouverte : les touches vont à la liste (OK = changer de chaîne).
+                if (listOpen && !(ev.key == Key.Menu && ev.type == KeyEventType.KeyDown)) return@onPreviewKeyEvent false
+                if (listOpen) { listOpen = false; return@onPreviewKeyEvent true }
                 val isOk = ev.key == Key.DirectionCenter || ev.key == Key.Enter || ev.key == Key.NumPadEnter
                 // Suite de l'appui long qui a ouvert le panneau : avalée jusqu'au relâchement.
                 if (isOk && okLatched) {
@@ -656,6 +669,9 @@ fun PlayerScreen(
                     // VOD : ◀ / ▶ = recul / avance (toujours actifs).
                     !currentTarget.isLive && ev.key == Key.DirectionLeft -> { seekBy(-seekBackSeconds * 1000L); true }
                     !currentTarget.isLive && ev.key == Key.DirectionRight -> { seekBy(seekForwardSeconds * 1000L); true }
+                    // Direct : ◀ = chaîne précédente (rappel), ▶ = liste des chaînes.
+                    currentTarget.isLive && ev.key == Key.DirectionLeft -> { previous?.invoke()?.let { currentOnSwitch(it) }; true }
+                    currentTarget.isLive && ev.key == Key.DirectionRight && channelList != null -> { listOpen = true; true }
                     digit != null && currentTarget.isLive && currentZapToNumber != null -> {
                         if (digits.length < 4) digits += digit
                         true
@@ -808,6 +824,34 @@ fun PlayerScreen(
 
         if (buffering && error == null) {
             CircularProgressIndicator(color = OnyxCyan, modifier = Modifier.align(Alignment.Center))
+        }
+
+        // Liste des chaînes en superposition (direct) : ▲▼ parcourir, OK changer, Retour fermer.
+        if (listOpen && channelList != null) {
+            val list = remember(listOpen) { channelList().filterNot { it.id in emptySet<String>() } }
+            val currentIdx = list.indexOfFirst { it.id == currentTarget.id }.coerceAtLeast(0)
+            val listState = androidx.compose.foundation.lazy.rememberLazyListState(initialFirstVisibleItemIndex = (currentIdx - 3).coerceAtLeast(0))
+            Column(
+                Modifier
+                    .align(Alignment.CenterStart)
+                    .fillMaxHeight()
+                    .width(440.dp)
+                    .background(Color(0xF00B0C14))
+                    .padding(horizontal = 16.dp, vertical = 20.dp),
+            ) {
+                Text("Chaînes", style = MaterialTheme.typography.headlineMedium, color = Color.White, modifier = Modifier.padding(bottom = 10.dp))
+                androidx.compose.foundation.lazy.LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
+                    androidx.compose.foundation.lazy.items(list, key = { it.id }) { c ->
+                        androidx.tv.material3.ListItem(
+                            selected = c.id == currentTarget.id,
+                            onClick = { listOpen = false; currentOnSwitch(ca.onyxtv.player.ui.components.channelTarget(c)) },
+                            headlineContent = { Text((c.number?.let { "$it · " } ?: "") + c.name, maxLines = 1) },
+                            supportingContent = { c.groupTitle?.let { Text(it, maxLines = 1, style = MaterialTheme.typography.bodySmall) } },
+                            modifier = (if (c.id == list.getOrNull(currentIdx)?.id) Modifier.focusRequester(listFocus) else Modifier).fillMaxWidth().padding(vertical = 2.dp),
+                        )
+                    }
+                }
+            }
         }
 
         // Panneau Menu : pistes audio, sous-titres, format d'image.

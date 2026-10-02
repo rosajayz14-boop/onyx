@@ -72,7 +72,8 @@ fun LiveTvScreen(vm: OnyxViewModel, onPlay: (PlayTarget) -> Unit) {
     val showMenu = LocalContextMenu.current
     val parental by vm.parental.collectAsStateWithLifecycle()
     val unlocked by vm.unlockedGroups.collectAsStateWithLifecycle()
-    val hidden = hiddenGroups(parental, unlocked)
+    val prefs by vm.prefs.collectAsStateWithLifecycle()
+    val hidden = hiddenGroups(parental, unlocked) + prefs.hiddenCategories
     val channels = state.channels
 
     if (state.loading && channels.isEmpty()) {
@@ -97,18 +98,19 @@ fun LiveTvScreen(vm: OnyxViewModel, onPlay: (PlayTarget) -> Unit) {
     val favCount = remember(channels, favorites, hidden) { channels.count { it.id in favorites && it.groupTitle !in hidden } }
     var group by remember { mutableStateOf(GROUP_ALL) }
     var pendingLocked by remember { mutableStateOf<String?>(null) }
-    val filtered = remember(channels, group, favorites, hidden) {
+    val filtered = remember(channels, group, favorites, hidden, prefs.hiddenChannelIds) {
+        val visible = channels.filterNot { it.id in prefs.hiddenChannelIds }
         when (group) {
-            GROUP_ALL -> channels.filterNot { it.groupTitle in hidden }
-            GROUP_FAV -> channels.filter { it.id in favorites && it.groupTitle !in hidden }
-            else -> channels.filter { it.groupTitle == group }
+            GROUP_ALL -> visible.filterNot { it.groupTitle in hidden }
+            // Favoris dans l'ordre choisi par l'utilisateur.
+            GROUP_FAV -> { val byId = visible.associateBy { it.id }; favorites.mapNotNull { byId[it] }.filter { it.groupTitle !in hidden } }
+            else -> visible.filter { it.groupTitle == group }
         }
     }
     // Id sélectionné stable : un changement de la liste (favori ajouté/retiré) ne ramène plus
     // la sélection sur la première chaîne alors que le focus est ailleurs.
     var selectedId by remember { mutableStateOf<String?>(null) }
     val selected = remember(filtered, selectedId) { filtered.firstOrNull { it.id == selectedId } ?: filtered.firstOrNull() }
-    val prefs by vm.prefs.collectAsStateWithLifecycle()
 
     fun selectGroup(g: String) {
         if (g in hidden) pendingLocked = g else group = g
@@ -151,7 +153,14 @@ fun LiveTvScreen(vm: OnyxViewModel, onPlay: (PlayTarget) -> Unit) {
                         ListItem(
                             selected = c.id == selected?.id,
                             onClick = { onPlay(c.toPlayTarget()) },
-                            onLongClick = { showMenu(channelMenu(c, c.id in favorites, play = { onPlay(c.toPlayTarget()) }, toggleFavorite = { vm.toggleFavorite(c.id) })) },
+                            onLongClick = {
+                                showMenu(channelMenu(c, c.id in favorites, play = { onPlay(c.toPlayTarget()) }, toggleFavorite = { vm.toggleFavorite(c.id) },
+                                    extra = if (group == GROUP_FAV) listOf(
+                                        ca.onyxtv.player.ui.components.MenuAction("⬆ Monter") { vm.moveFavorite(c.id, -1) },
+                                        ca.onyxtv.player.ui.components.MenuAction("⬇ Descendre") { vm.moveFavorite(c.id, +1) },
+                                    ) else emptyList(),
+                                    hideChannel = { vm.hideChannel(c.id, true) }))
+                            },
                             leadingContent = {
                                 Box(Modifier.size(52.dp).clip(RoundedCornerShape(6.dp))) {
                                     Thumbnail(c.logoUrl, c.name.take(2).uppercase(), c.id, Modifier.fillMaxSize())

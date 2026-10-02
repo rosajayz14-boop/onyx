@@ -73,8 +73,9 @@ fun MosaicScreen(vm: OnyxViewModel, onPlay: (PlayTarget) -> Unit) {
     val favorites by vm.favorites.collectAsStateWithLifecycle()
     val parental by vm.parental.collectAsStateWithLifecycle()
     val unlocked by vm.unlockedGroups.collectAsStateWithLifecycle()
-    val hidden = hiddenGroups(parental, unlocked)
-    val channels = remember(state.channels, hidden) { state.channels.filterNot { it.groupTitle in hidden } }
+    val prefs by vm.prefs.collectAsStateWithLifecycle()
+    val hidden = hiddenGroups(parental, unlocked) + prefs.hiddenCategories
+    val channels = remember(state.channels, hidden, prefs.hiddenChannelIds) { state.channels.filterNot { it.groupTitle in hidden || it.id in prefs.hiddenChannelIds } }
 
     if (channels.isEmpty()) {
         EmptyState("Mosaïque indisponible", "Ajoutez des chaînes dans Réglages pour utiliser le multi-écran.")

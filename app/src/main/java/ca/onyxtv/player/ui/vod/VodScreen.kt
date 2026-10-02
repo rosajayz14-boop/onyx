@@ -51,7 +51,8 @@ fun VodScreen(
     val recents by vm.recents.collectAsStateWithLifecycle()
     val parental by vm.parental.collectAsStateWithLifecycle()
     val unlocked by vm.unlockedGroups.collectAsStateWithLifecycle()
-    val hidden = hiddenGroups(parental, unlocked)
+    val prefs by vm.prefs.collectAsStateWithLifecycle()
+    val hidden = hiddenGroups(parental, unlocked) + prefs.hiddenCategories
     val vod = remember(state.vod, hidden) { state.vod.filterNot { it.category in hidden } }
 
     if (state.loading && vod.isEmpty()) {
@@ -71,7 +72,18 @@ fun VodScreen(
     val ofKind = remember(vod, kind) { vod.filter { it.kind == kind } }
     val categories = remember(ofKind) { ofKind.mapNotNull { it.category }.distinct() }
     var category by remember(kind) { mutableStateOf<String?>(null) }
-    val shown = remember(ofKind, category) { if (category == null) ofKind else ofKind.filter { it.category == category } }
+    var sort by remember { mutableStateOf(0) }   // 0 catalogue · 1 récents · 2 A-Z · 3 année · 4 note
+    val sortLabel = listOf("Catalogue", "Récents", "A-Z", "Année", "Note")[sort]
+    val shown = remember(ofKind, category, sort) {
+        val base = if (category == null) ofKind else ofKind.filter { it.category == category }
+        when (sort) {
+            1 -> base.asReversed()
+            2 -> base.sortedBy { it.name.lowercase() }
+            3 -> base.sortedByDescending { it.year?.take(4)?.toIntOrNull() ?: 0 }
+            4 -> base.sortedByDescending { it.rating?.toDoubleOrNull() ?: 0.0 }
+            else -> base
+        }
+    }
     val progressById = remember(recents) { recents.filter { it.resumable }.associate { it.id to it.progress } }
     val movieCount = remember(vod) { vod.count { it.kind == MediaKind.MOVIE } }
     val seriesCount = remember(vod) { vod.count { it.kind == MediaKind.SERIES } }
@@ -87,7 +99,10 @@ fun VodScreen(
                 CategoryChip("Films ($movieCount)", kind == MediaKind.MOVIE) { kind = MediaKind.MOVIE }
                 CategoryChip("Séries ($seriesCount)", kind == MediaKind.SERIES) { kind = MediaKind.SERIES }
             }
-            Text("${shown.size} titres", color = OnyxMuted, style = MaterialTheme.typography.bodyLarge)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                CategoryChip("Tri : $sortLabel", false) { sort = (sort + 1) % 5 }
+                Text("${shown.size} titres", color = OnyxMuted, style = MaterialTheme.typography.bodyLarge)
+            }
         }
 
         LazyRow(
@@ -131,7 +146,8 @@ fun VodScreen(
                     },
                     onClick = { onOpenDetail(v) },
                     onLongClick = {
-                        showMenu(vodMenu(v, v.id in favorites, openDetail = { onOpenDetail(v) }, play = { onPlay(v.toPlayTarget()) }, toggleFavorite = { vm.toggleFavorite(v.id) }))
+                        showMenu(vodMenu(v, v.id in favorites, openDetail = { onOpenDetail(v) }, play = { onPlay(v.toPlayTarget()) }, toggleFavorite = { vm.toggleFavorite(v.id) },
+                            hideCategory = v.category?.let { cat -> { vm.hideCategory(cat, true) } }))
                     },
                 )
             }

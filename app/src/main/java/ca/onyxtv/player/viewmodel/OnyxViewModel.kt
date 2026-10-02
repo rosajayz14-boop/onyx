@@ -37,6 +37,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 import ca.onyxtv.player.ui.components.toPlayTarget
 import java.io.File
 import java.util.UUID
@@ -159,11 +160,12 @@ class OnyxViewModel(app: Application) : AndroidViewModel(app) {
             _state.map { it.channels to it.vod }.distinctUntilChanged(),
             parental,
             _unlockedGroups,
-        ) { q, (channels, vod), p, u ->
+            prefs,
+        ) { q, (channels, vod), p, u, pr ->
             val needle = q.trim()
-            val hidden = hiddenGroups(p, u)
+            val hidden = hiddenGroups(p, u) + pr.hiddenCategories
             if (needle.length < 2) emptyList<Channel>() to emptyList()
-            else channels.asSequence().filter { it.groupTitle !in hidden && it.name.contains(needle, ignoreCase = true) }.take(60).toList() to
+            else channels.asSequence().filter { it.groupTitle !in hidden && it.id !in pr.hiddenChannelIds && it.name.contains(needle, ignoreCase = true) }.take(60).toList() to
                 vod.asSequence().filter { it.category !in hidden && it.name.contains(needle, ignoreCase = true) }.take(60).toList()
         }.flowOn(Dispatchers.Default)
             .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList<Channel>() to emptyList())
@@ -348,6 +350,8 @@ class OnyxViewModel(app: Application) : AndroidViewModel(app) {
             else refreshAccounts()
         }
         checkForUpdate()
+        // Rappels / enregistrements programmés : vérification toutes les 20 s tant que l'app vit.
+        viewModelScope.launch { while (true) { delay(20_000); runCatching { checkReminders() } } }
     }
 
     /**
@@ -489,8 +493,75 @@ class OnyxViewModel(app: Application) : AndroidViewModel(app) {
     /** Chaîne portant ce numéro (saisie au pavé numérique dans le lecteur). */
     /** Chaînes visibles pour le zapping / numéro : catégories verrouillées (parental) exclues. */
     private fun zapChannels(): List<Channel> {
-        val hidden = hiddenGroups(parental.value, unlockedGroups.value)
-        return _state.value.channels.filter { it.groupTitle !in hidden }
+        val pr = prefs.value
+        val hidden = hiddenGroups(parental.value, unlockedGroups.value) + pr.hiddenCategories
+        return _state.value.channels.filter { it.groupTitle !in hidden && it.id !in pr.hiddenChannelIds }
+    }
+
+    /** Liste des chaînes zappables (superposition « liste des chaînes » du lecteur). */
+    fun zapList(): List<Channel> = zapChannels()
+
+    fun channelById(id: String): Channel? = _state.value.channels.firstOrNull { it.id == id }
+
+    // ---- Chaîne précédente (rappel) ----
+    private var currentLiveId: String? = null
+    private var lastLiveId: String? = null
+    fun noteLive(id: String) { if (id != currentLiveId) { lastLiveId = currentLiveId; currentLiveId = id } }
+    fun previousChannel(): Channel? = lastLiveId?.let { id -> zapChannels().firstOrNull { it.id == id } }
+
+    // ---- Masquage de chaînes / catégories, ordre des favoris ----
+    fun hideChannel(id: String, hidden: Boolean) {
+        viewModelScope.launch { userStore.updatePrefs { it.copy(hiddenChannelIds = if (hidden) it.hiddenChannelIds + id else it.hiddenChannelIds - id) } }
+    }
+    fun hideCategory(name: String, hidden: Boolean) {
+        viewModelScope.launch { userStore.updatePrefs { it.copy(hiddenCategories = if (hidden) it.hiddenCategories + name else it.hiddenCategories - name) } }
+    }
+    fun unhideAll() {
+        viewModelScope.launch { userStore.updatePrefs { it.copy(hiddenCategories = emptySet(), hiddenChannelIds = emptySet()) } }
+    }
+    fun moveFavorite(id: String, delta: Int) { viewModelScope.launch { userStore.moveFavorite(id, delta) } }
+
+    // ---- Rappels et enregistrements programmés (guide) ----
+    val reminders: StateFlow<List<ca.onyxtv.player.core.data.Reminder>> =
+        userStore.reminders.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    private val _dueReminder = MutableStateFlow<ca.onyxtv.player.core.data.Reminder?>(null)
+    /** Rappel arrivé à échéance pendant que l'app est ouverte (dialogue « Regarder »). */
+    val dueReminder: StateFlow<ca.onyxtv.player.core.data.Reminder?> = _dueReminder.asStateFlow()
+    fun dismissDueReminder() { _dueReminder.value = null }
+    fun removeReminder(id: String) {
+        viewModelScope.launch { userStore.removeReminder(id); ca.onyxtv.player.core.work.ReminderWorker.cancel(getApplication(), id) }
+    }
+
+    fun toggleReminder(ch: Channel, p: EpgProgram, record: Boolean) {
+        val id = ca.onyxtv.player.core.data.reminderId(ch.id, p.start, record)
+        val ctx = getApplication<Application>()
+        viewModelScope.launch {
+            if (reminders.value.any { it.id == id }) {
+                userStore.removeReminder(id)
+                ca.onyxtv.player.core.work.ReminderWorker.cancel(ctx, id)
+            } else {
+                val r = ca.onyxtv.player.core.data.Reminder(id, ch.id, ch.name, p.title, p.start, p.stop, record)
+                userStore.addReminder(r)
+                ca.onyxtv.player.core.work.ReminderWorker.schedule(ctx, r, ch.url)
+            }
+        }
+    }
+
+    private fun checkReminders() {
+        val now = System.currentTimeMillis()
+        reminders.value.forEach { r ->
+            if (r.record) {
+                if (now >= r.start - 30_000L && now < r.stop) {
+                    channelById(r.channelId)?.let { ch -> startRecording(ch, ((r.stop - now) / 60_000L).toInt().coerceAtLeast(1)) }
+                    viewModelScope.launch { userStore.removeReminder(r.id) }
+                } else if (now >= r.stop) viewModelScope.launch { userStore.removeReminder(r.id) }
+            } else {
+                if (now >= r.start - 2 * 60_000L && now < r.start + 5 * 60_000L) {
+                    if (_dueReminder.value == null) _dueReminder.value = r
+                    viewModelScope.launch { userStore.removeReminder(r.id) }
+                } else if (now >= r.start + 5 * 60_000L) viewModelScope.launch { userStore.removeReminder(r.id) }
+            }
+        }
     }
 
     fun channelByNumber(n: Int): Channel? = zapChannels().firstOrNull { it.number == n }

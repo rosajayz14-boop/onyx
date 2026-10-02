@@ -64,6 +64,9 @@ fun VodItem.toPlayTarget() = PlayTarget(
     isLive = false,
 )
 
+/** Forme non-extension (utilisée depuis le lecteur). */
+fun channelTarget(c: Channel): PlayTarget = c.toPlayTarget()
+
 fun RecentItem.toPlayTarget() = PlayTarget(
     id = id,
     url = url,

@@ -50,6 +50,7 @@ fun vodMenu(
     play: (() -> Unit)?,
     toggleFavorite: () -> Unit,
     extra: List<MenuAction> = emptyList(),
+    hideCategory: (() -> Unit)? = null,
 ): ContextMenuRequest = ContextMenuRequest(
     title = item.name,
     subtitle = listOfNotNull(if (item.kind == MediaKind.SERIES) "Série" else "Film", item.year, item.category).joinToString(" · "),
@@ -58,6 +59,7 @@ fun vodMenu(
         addAll(extra)
         add(MenuAction("Ouvrir la fiche", openDetail))
         if (play != null) add(MenuAction("▶ Lire maintenant", play))
+        if (hideCategory != null && item.category != null) add(MenuAction("🙈 Masquer la catégorie « ${item.category} »", hideCategory))
     },
 )
 
@@ -68,6 +70,7 @@ fun channelMenu(
     play: () -> Unit,
     toggleFavorite: () -> Unit,
     extra: List<MenuAction> = emptyList(),
+    hideChannel: (() -> Unit)? = null,
 ): ContextMenuRequest = ContextMenuRequest(
     title = (channel.number?.let { "$it · " } ?: "") + channel.name,
     subtitle = channel.groupTitle,
@@ -75,6 +78,7 @@ fun channelMenu(
         add(MenuAction(if (isFavorite) "★ Retirer des favoris" else "☆ Ajouter aux favoris", toggleFavorite))
         addAll(extra)
         add(MenuAction("▶ Regarder", play))
+        if (hideChannel != null) add(MenuAction("🙈 Masquer cette chaîne", hideChannel))
     },
 )
 

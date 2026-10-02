@@ -28,6 +28,7 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -97,8 +98,10 @@ fun GuideScreen(vm: OnyxViewModel, onPlay: (PlayTarget) -> Unit) {
     val parental by vm.parental.collectAsStateWithLifecycle()
     val unlocked by vm.unlockedGroups.collectAsStateWithLifecycle()
     val prefs by vm.prefs.collectAsStateWithLifecycle()
-    val hidden = hiddenGroups(parental, unlocked)
-    val channels = remember(state.channels, hidden) { state.channels.filterNot { it.groupTitle in hidden } }
+    val hidden = hiddenGroups(parental, unlocked) + prefs.hiddenCategories
+    val channels = remember(state.channels, hidden, prefs.hiddenChannelIds) { state.channels.filterNot { it.groupTitle in hidden || it.id in prefs.hiddenChannelIds } }
+    val reminders by vm.reminders.collectAsStateWithLifecycle()
+    val reminderIds = remember(reminders) { reminders.mapTo(HashSet()) { it.id } }
 
     if (state.loading && channels.isEmpty()) { LoadingState("Chargement du guide…"); return }
     if (channels.isEmpty()) {
@@ -109,12 +112,19 @@ fun GuideScreen(vm: OnyxViewModel, onPlay: (PlayTarget) -> Unit) {
     // Horloge de la grille (rafraîchie chaque minute) et fenêtre temporelle.
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) { while (true) { delay(60_000); now = System.currentTimeMillis() } }
-    val windowStart = remember(now / (SLOT_MIN * MS_PER_MIN)) {
+    // Période affichée : maintenant, ce soir (20 h), demain (même heure).
+    var dayMode by remember { mutableIntStateOf(0) }
+    val windowStart = remember(now / (SLOT_MIN * MS_PER_MIN), dayMode) {
         val slot = SLOT_MIN * MS_PER_MIN
-        ((now - WINDOW_BEFORE_MIN * MS_PER_MIN) / slot) * slot
+        val base = when (dayMode) {
+            1 -> java.util.Calendar.getInstance().apply { timeInMillis = now; set(java.util.Calendar.HOUR_OF_DAY, 20); set(java.util.Calendar.MINUTE, 0); set(java.util.Calendar.SECOND, 0) }.timeInMillis - WINDOW_BEFORE_MIN * MS_PER_MIN
+            2 -> now + 24 * 3_600_000L - WINDOW_BEFORE_MIN * MS_PER_MIN
+            else -> now - WINDOW_BEFORE_MIN * MS_PER_MIN
+        }
+        (base / slot) * slot
     }
     val windowEnd = windowStart + WINDOW_MIN * MS_PER_MIN
-    val nowX = minutesToDp((now - windowStart) / MS_PER_MIN)
+    val nowX = if (now in windowStart..windowEnd) minutesToDp((now - windowStart) / MS_PER_MIN) else (-100).dp
 
     val groups = remember(channels) { channels.mapNotNull { it.groupTitle }.distinct() }
     var group by remember { mutableStateOf(GROUP_ALL) }
@@ -163,13 +173,20 @@ fun GuideScreen(vm: OnyxViewModel, onPlay: (PlayTarget) -> Unit) {
             onWatch = { ch -> onPlay(ch.toPlayTarget()) },
             onCatchup = { ch, p -> scope.launch { vm.catchupTarget(ch, p)?.let(onPlay) } },
             onRecord = { ch, p ->
-                val remaining = ((p.stop - now) / MS_PER_MIN).toInt().coerceIn(1, 8 * 60)
+                val remaining = ((p.stop - now) / MS_PER_MIN).toInt().coerceIn(1, 5 * 60 + 45)
                 vm.startRecording(ch, remaining)
             },
+            reminderIds = reminderIds,
+            onRemind = { ch, p -> vm.toggleReminder(ch, p, record = false) },
+            onSchedule = { ch, p -> vm.toggleReminder(ch, p, record = true) },
         )
 
         // Filtres de catégorie
         LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(vertical = 8.dp)) {
+            item { Chip("Maintenant", dayMode == 0) { dayMode = 0 } }
+            item { Chip("Ce soir", dayMode == 1) { dayMode = 1 } }
+            item { Chip("Demain", dayMode == 2) { dayMode = 2 } }
+            item { Text("│", color = OnyxMuted, modifier = Modifier.padding(horizontal = 4.dp)) }
             item { Chip("Toutes", group == GROUP_ALL) { group = GROUP_ALL } }
             item { Chip("★ Favoris", group == GROUP_FAV) { group = GROUP_FAV } }
             items(groups, key = { it }) { g -> Chip(g, group == g) { group = g } }
@@ -178,7 +195,7 @@ fun GuideScreen(vm: OnyxViewModel, onPlay: (PlayTarget) -> Unit) {
         // En-tête des heures (défile avec les lignes)
         Row(Modifier.fillMaxWidth().height(28.dp)) {
             Box(Modifier.width(CHANNEL_COL), contentAlignment = Alignment.CenterStart) {
-                Text("${shown.size} chaînes", color = OnyxMuted, style = MaterialTheme.typography.bodyMedium)
+                Text("${shown.size} chaînes · " + java.text.SimpleDateFormat("EEE d MMM", java.util.Locale.getDefault()).format(java.util.Date(windowStart + WINDOW_BEFORE_MIN * MS_PER_MIN)), color = OnyxMuted, style = MaterialTheme.typography.bodyMedium, maxLines = 1)
             }
             Box(Modifier.weight(1f).fillMaxHeight().horizontalScroll(hScroll)) {
                 Row {
@@ -237,6 +254,9 @@ private fun DetailsPanel(
     onWatch: (Channel) -> Unit,
     onCatchup: (Channel, EpgProgram) -> Unit,
     onRecord: (Channel, EpgProgram) -> Unit,
+    reminderIds: Set<String> = emptySet(),
+    onRemind: (Channel, EpgProgram) -> Unit = { _, _ -> },
+    onSchedule: (Channel, EpgProgram) -> Unit = { _, _ -> },
 ) {
     Row(
         Modifier
@@ -287,6 +307,12 @@ private fun DetailsPanel(
             Button(onClick = { onWatch(ch) }) { Text("▶ Regarder") }
             if (p != null && p.stop <= now && ch.archiveDays > 0) Button(onClick = { onCatchup(ch, p) }) { Text("↺ Revoir") }
             if (p != null && p.isLiveAt(now)) Button(onClick = { onRecord(ch, p) }) { Text("● Enregistrer") }
+            if (p != null && p.start > now) {
+                val rem = ca.onyxtv.player.core.data.reminderId(ch.id, p.start, false) in reminderIds
+                val rec = ca.onyxtv.player.core.data.reminderId(ch.id, p.start, true) in reminderIds
+                Button(onClick = { onRemind(ch, p) }) { Text(if (rem) "✓ Rappel" else "⏰ Rappel") }
+                Button(onClick = { onSchedule(ch, p) }) { Text(if (rec) "✓ Programmé" else "● Programmer") }
+            }
         }
     }
 }

@@ -52,7 +52,8 @@ fun SearchScreen(
 ) {
     val parental by vm.parental.collectAsStateWithLifecycle()
     val unlocked by vm.unlockedGroups.collectAsStateWithLifecycle()
-    val hidden = hiddenGroups(parental, unlocked)
+    val prefs by vm.prefs.collectAsStateWithLifecycle()
+    val hidden = hiddenGroups(parental, unlocked) + prefs.hiddenCategories
     val query by vm.searchQuery.collectAsStateWithLifecycle()
     val (chanHits, vodHits) = vm.searchResults.collectAsStateWithLifecycle().value
     val favorites by vm.favorites.collectAsStateWithLifecycle()
@@ -62,7 +63,7 @@ fun SearchScreen(
     // en forme qu'au plus 120 résultats.
     val results = remember(chanHits, vodHits, hidden) {
         buildList {
-            chanHits.filterNot { it.groupTitle in hidden }.forEach {
+            chanHits.filterNot { it.groupTitle in hidden || it.id in prefs.hiddenChannelIds }.forEach {
                 add(SearchHit(it.name, it.groupTitle, it.logoUrl, it.id, it.name.take(2).uppercase(), 16f / 9f, "DIRECT", it.toPlayTarget(), null))
             }
             vodHits.filterNot { it.category in hidden }.forEach {

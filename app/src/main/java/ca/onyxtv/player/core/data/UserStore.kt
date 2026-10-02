@@ -69,7 +69,24 @@ data class AppPrefs(
     val subtitleScale: Float = 1f,
     val subtitleBackground: Boolean = true,
     val subtitleYellow: Boolean = false,
+    /** Chaînes et catégories masquées par l'utilisateur (menu appui long). */
+    val hiddenChannelIds: Set<String> = emptySet(),
+    val hiddenCategories: Set<String> = emptySet(),
 )
+
+/** Rappel de programme (dialogue + notification) ou enregistrement programmé depuis le guide. */
+@Serializable
+data class Reminder(
+    val id: String,
+    val channelId: String,
+    val channelName: String,
+    val title: String,
+    val start: Long,
+    val stop: Long,
+    val record: Boolean = false,
+)
+
+fun reminderId(channelId: String, start: Long, record: Boolean) = "$channelId:$start:${if (record) "rec" else "rem"}"
 
 /**
  * Données utilisateur locales : favoris (ids de chaînes/contenus), récents (reprise),
@@ -81,6 +98,38 @@ class UserStore(private val context: Context) {
     private val favKey = stringPreferencesKey("favorites_json")
     private val recentKey = stringPreferencesKey("recents_json")
     private val parentalKey = stringPreferencesKey("parental_json")
+    private val remindersKey = stringPreferencesKey("reminders_json")
+    private val reminderSer = ListSerializer(Reminder.serializer())
+
+    val reminders: Flow<List<Reminder>> = context.userDataStore.data.map { prefs ->
+        val raw = prefs[remindersKey] ?: "[]"
+        runCatching { json.decodeFromString(reminderSer, raw) }.getOrDefault(emptyList()).sortedBy { it.start }
+    }
+
+    suspend fun addReminder(r: Reminder) {
+        context.userDataStore.edit { p ->
+            val cur = runCatching { p[remindersKey]?.let { json.decodeFromString(reminderSer, it) } }.getOrNull().orEmpty()
+            p[remindersKey] = json.encodeToString(reminderSer, cur.filterNot { it.id == r.id } + r)
+        }
+    }
+
+    suspend fun removeReminder(id: String) {
+        context.userDataStore.edit { p ->
+            val cur = runCatching { p[remindersKey]?.let { json.decodeFromString(reminderSer, it) } }.getOrNull().orEmpty()
+            p[remindersKey] = json.encodeToString(reminderSer, cur.filterNot { it.id == id })
+        }
+    }
+
+    /** Déplace un favori vers le haut (delta < 0) ou le bas : l'ordre du Set (LinkedHashSet) est conservé. */
+    suspend fun moveFavorite(id: String, delta: Int) {
+        context.userDataStore.edit { p ->
+            val cur = runCatching { p[favKey]?.let { json.decodeFromString(favSer, it) } }.getOrNull().orEmpty().toMutableList()
+            val i = cur.indexOf(id)
+            val j = i + delta
+            if (i >= 0 && j in cur.indices) { cur[i] = cur[j].also { cur[j] = cur[i] } }
+            p[favKey] = json.encodeToString(favSer, LinkedHashSet(cur))
+        }
+    }
     private val prefsKey = stringPreferencesKey("prefs_json")
 
     val prefs: Flow<AppPrefs> = context.userDataStore.data.map { prefs ->

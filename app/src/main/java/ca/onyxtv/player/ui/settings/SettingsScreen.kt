@@ -131,6 +131,8 @@ fun SettingsScreen(vm: OnyxViewModel) {
 
         // ---- Lecture ----
         item { PlaybackCard(vm) }
+        item { HiddenCard(vm, state) }
+        item { RemindersCard(vm) }
 
         // ---- Application (version, mises à jour) ----
         item { AppCard(vm) }
@@ -429,6 +431,40 @@ private fun PlaybackCard(vm: OnyxViewModel) {
             }) { Text("Taille ×${prefs.subtitleScale}") }
             Button(onClick = { vm.setSubtitleStyle(background = !prefs.subtitleBackground) }) { Text("Fond : ${if (prefs.subtitleBackground) "sombre" else "aucun"}") }
             Button(onClick = { vm.setSubtitleStyle(yellow = !prefs.subtitleYellow) }) { Text("Couleur : ${if (prefs.subtitleYellow) "jaune" else "blanc"}") }
+        }
+    }
+}
+
+/** Chaînes et catégories masquées (menu appui long) : réaffichage. */
+@Composable
+private fun HiddenCard(vm: OnyxViewModel, state: OnyxUiState) {
+    val prefs by vm.prefs.collectAsStateWithLifecycle()
+    if (prefs.hiddenCategories.isEmpty() && prefs.hiddenChannelIds.isEmpty()) return
+    FormCard("Éléments masqués") {
+        prefs.hiddenCategories.forEach { c ->
+            Button(onClick = { vm.hideCategory(c, false) }, modifier = Modifier.fillMaxWidth()) { Text("Réafficher la catégorie « $c »") }
+        }
+        prefs.hiddenChannelIds.forEach { id ->
+            val name = state.channels.firstOrNull { it.id == id }?.name ?: id
+            Button(onClick = { vm.hideChannel(id, false) }, modifier = Modifier.fillMaxWidth()) { Text("Réafficher la chaîne « $name »") }
+        }
+        Spacer(Modifier.height(6.dp))
+        Button(onClick = { vm.unhideAll() }) { Text("Tout réafficher") }
+    }
+}
+
+/** Rappels et enregistrements programmés depuis le guide. */
+@Composable
+private fun RemindersCard(vm: OnyxViewModel) {
+    val reminders by vm.reminders.collectAsStateWithLifecycle()
+    if (reminders.isEmpty()) return
+    val fmt = SimpleDateFormat("EEE d MMM HH:mm", Locale.getDefault())
+    FormCard("Rappels et enregistrements programmés") {
+        Text("Si l'app est fermée, une notification s'affiche à l'heure ; l'enregistrement programmé démarre si Android l'autorise, sinon la notification vous invite à ouvrir ONYX TV.", color = OnyxMuted, style = MaterialTheme.typography.bodyMedium)
+        reminders.forEach { r ->
+            Button(onClick = { vm.removeReminder(r.id) }, modifier = Modifier.fillMaxWidth()) {
+                Text((if (r.record) "● " else "⏰ ") + "${fmt.format(Date(r.start))} · ${r.channelName} · ${r.title}  —  OK pour annuler", maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
         }
     }
 }
