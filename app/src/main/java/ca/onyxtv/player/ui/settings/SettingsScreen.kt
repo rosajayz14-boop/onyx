@@ -23,6 +23,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
+import androidx.compose.foundation.focusGroup
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -155,8 +158,8 @@ fun SettingsScreen(vm: OnyxViewModel) {
         androidx.compose.foundation.layout.Box(
             Modifier
                 .fillMaxSize()
-                .androidx.compose.ui.focus.focusProperties { exit = { androidx.compose.ui.focus.FocusRequester.Cancel } }
-                .androidx.compose.foundation.focusGroup()
+                .focusProperties { exit = { FocusRequester.Cancel } }
+                .focusGroup()
         ) {
             ca.onyxtv.player.ui.components.PinDialog(
                 title = "Contrôle parental",

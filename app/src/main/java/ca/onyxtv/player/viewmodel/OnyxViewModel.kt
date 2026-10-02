@@ -174,7 +174,6 @@ class OnyxViewModel(app: Application) : AndroidViewModel(app) {
     private val _lastCrash = MutableStateFlow(runCatching { crashFile.takeIf { it.exists() }?.readText() }.getOrNull())
     /** Dernier plantage enregistré (observable : « Effacer le journal » met l'écran à jour). */
     val lastCrash: StateFlow<String?> = _lastCrash.asStateFlow()
-        private set
 
     fun clearCrash() { runCatching { crashFile.delete() }; _lastCrash.value = null }
 
