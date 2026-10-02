@@ -21,7 +21,11 @@ object Http {
         .retryOnConnectionFailure(true)
         .build()
 
-    private const val UA = "ONYX-TV/1.0 (Android TV)"
+    /** User-Agent d'un lecteur Android standard : certains panneaux servent un guide différent
+     *  (ou vide) aux clients qu'ils ne reconnaissent pas. */
+    const val UA = "Dalvik/2.1.0 (Linux; U; Android 11; AFTKA Build/RS8104)"
+    const val UA_ONYX = "ONYX-TV/1.0 (Android TV)"
+    const val UA_SMARTERS = "IPTVSmartersPlayer"
 
     /** Client pour les GROS téléchargements (guide xmltv de 100 Mo, catalogues) : pas de limite
      *  globale d'appel (callTimeout), seul le readTimeout protège contre un serveur muet. */
@@ -71,6 +75,25 @@ object Http {
 
     suspend fun get(url: String): String = withContext(Dispatchers.IO) {
         val request = Request.Builder().url(url).header("User-Agent", UA).build()
+        client.newCall(request).execute().use { resp ->
+            if (!resp.isSuccessful) throw IOException("HTTP ${resp.code}")
+            resp.body?.string().orEmpty()
+        }
+    }
+
+    /** GET avec un User-Agent précis (test du guide : le panneau répond-il autrement ?). */
+    suspend fun getWithUa(url: String, userAgent: String): String = withContext(Dispatchers.IO) {
+        val request = Request.Builder().url(url).header("User-Agent", userAgent).build()
+        client.newCall(request).execute().use { resp ->
+            if (!resp.isSuccessful) throw IOException("HTTP ${resp.code}")
+            resp.body?.string().orEmpty()
+        }
+    }
+
+    /** POST de formulaire (IPTV Smarters envoie ses appels player_api ainsi). */
+    suspend fun postForm(url: String, fields: Map<String, String>, userAgent: String = UA): String = withContext(Dispatchers.IO) {
+        val body = okhttp3.FormBody.Builder().apply { fields.forEach { (k, v) -> add(k, v) } }.build()
+        val request = Request.Builder().url(url).header("User-Agent", userAgent).post(body).build()
         client.newCall(request).execute().use { resp ->
             if (!resp.isSuccessful) throw IOException("HTTP ${resp.code}")
             resp.body?.string().orEmpty()

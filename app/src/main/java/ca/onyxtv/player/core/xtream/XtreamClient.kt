@@ -318,6 +318,22 @@ class XtreamClient(
             .getOrElse { "ERREUR " + Http.describe(it) }
     }
 
+    /**
+     * Variantes de la même requête get_short_epg (test du guide) : GET avec notre User-Agent,
+     * GET avec celui de Smarters, POST formulaire comme Smarters. Chaque ligne : variante → début brut.
+     */
+    suspend fun epgRawVariants(src: PlaylistSource.Xtream, streamId: String): List<String> = withContext(Dispatchers.IO) {
+        val url = api(src, "get_short_epg", "&stream_id=$streamId&limit=4")
+        val form = mapOf("username" to src.username, "password" to src.password, "action" to "get_short_epg", "stream_id" to streamId, "limit" to "4")
+        fun short(r: Result<String>) = r.map { it.replace(Regex("\\s+"), " ").take(140) }.getOrElse { "ERREUR " + Http.describe(it) }
+        listOf(
+            "GET UA Android : " + short(runCatching { Http.getWithUa(url, Http.UA) }),
+            "GET UA ONYX : " + short(runCatching { Http.getWithUa(url, Http.UA_ONYX) }),
+            "GET UA Smarters : " + short(runCatching { Http.getWithUa(url, Http.UA_SMARTERS) }),
+            "POST formulaire (Smarters) : " + short(runCatching { Http.postForm("${base(src)}/player_api.php", form, Http.UA_SMARTERS) }),
+        )
+    }
+
     private suspend fun epgListings(src: PlaylistSource.Xtream, action: String, extra: String, streamId: String): List<EpgProgram> =
         withContext(Dispatchers.IO) {
             val root = runCatching { json.parseToJsonElement(Http.get(api(src, action, extra))) }.getOrNull()

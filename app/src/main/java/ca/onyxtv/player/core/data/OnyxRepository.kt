@@ -262,7 +262,12 @@ class OnyxRepository(
         // ===== VERDICT EN HAUT (lisible sans défiler) : l'API du panneau a-t-elle un guide en direct ? =====
         val nowTop = System.currentTimeMillis()
         sources.filterIsInstance<PlaylistSource.Xtream>().firstOrNull()?.let { src ->
-            val scan = channels.filter { it.id.startsWith("xt:${src.id}:") && it.streamId != null }.take(40)
+            // 40 chaînes RÉPARTIES dans la liste, d'abord celles qui ont un identifiant EPG : les
+            // 40 premières de la liste sont souvent des chaînes « événement » sans guide.
+            val mine = channels.filter { it.id.startsWith("xt:${src.id}:") && it.streamId != null }
+            val withId = mine.filter { !it.epgChannelId.isNullOrBlank() }.ifEmpty { mine }
+            val step = (withId.size / 40).coerceAtLeast(1)
+            val scan = withId.filterIndexed { i, _ -> i % step == 0 }.take(40)
             var any = 0; var fut = 0; var ex = ""
             scan.forEach { c ->
                 val r = runCatching { xt.shortEpg(src, c.streamId!!, 8) }.getOrDefault(emptyList())
@@ -273,6 +278,12 @@ class OnyxRepository(
             sb.append("API panneau (get_short_epg) sur ${scan.size} cha\u00eenes : $any avec donn\u00e9es \u00b7 $fut \u00e0 venir\n")
             if (fut > 0) sb.append("\u2713 EPG en direct disponible \u2014 ex. $ex\n")
             else sb.append("\u2717 Aucune cha\u00eene n'a d'EPG \u00e0 venir via l'API du panneau.\n")
+            // Même requête que Smarters, sous 4 formes : si l'une répond avec des programmes, on sait quoi imiter.
+            (mine.firstOrNull { it.name.contains("A&E", true) } ?: withId.firstOrNull())?.let { c ->
+                sb.append("get_short_epg \u00ab ${c.name} \u00bb (sid ${c.streamId}) :\n")
+                runCatching { xt.epgRawVariants(src, c.streamId!!) }.getOrElse { listOf("ERREUR " + Http.describe(it)) }
+                    .forEach { sb.append("  \u2022 $it\n") }
+            }
             sb.append("\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\n\n")
         }
         // En-tête du M3U du compte : adresse du guide « officielle » du fournisseur.
@@ -349,9 +360,9 @@ class OnyxRepository(
                 if (src is PlaylistSource.Xtream && label == src.label) runCatching {
                     val alt = java.io.File(tmp.parentFile, tmp.name + ".ua")
                     try {
-                        Http.getToFileWithUa(url, alt, "Dalvik/2.1.0 (Linux; U; Android 11; AFTKA Build/RS8104)")
+                        Http.getToFileWithUa(url, alt, Http.UA_ONYX)
                         val altList = alt.inputStream().buffered().use { XmltvParser.parse(it, Long.MIN_VALUE, Long.MAX_VALUE) }
-                        sb.append("  Avec un User-Agent Android standard : ${ca.onyxtv.player.core.net.StreamProbe.fmtSize(alt.length())} · ${XmltvParser.lastProgrammeTags} programmes · dernier horodatage « ${XmltvParser.lastLastStartRaw} »\n")
+                        sb.append("  Avec un autre User-Agent (ONYX) : ${ca.onyxtv.player.core.net.StreamProbe.fmtSize(alt.length())} · ${XmltvParser.lastProgrammeTags} programmes · dernier horodatage « ${XmltvParser.lastLastStartRaw} »\n")
                         if (altList.isNotEmpty()) Unit
                     } finally { alt.delete() }
                 }
