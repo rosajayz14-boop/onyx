@@ -14,6 +14,12 @@ import java.util.Locale
  * Format d'horodatage XMLTV : "yyyyMMddHHmmss Z" (ex. 20260929180000 -0400).
  */
 object XmltvParser {
+    /** Diagnostic du dernier parse : erreur, balises vues, premier horodatage brut. */
+    @Volatile var lastError: String? = null
+    @Volatile var lastProgrammeTags: Int = 0
+    @Volatile var lastDropped: Int = 0
+    @Volatile var lastFirstStartRaw: String? = null
+
 
     private val TIME_FMT = SimpleDateFormat("yyyyMMddHHmmss Z", Locale.US)
     private val TIME_FMT_NO_TZ = SimpleDateFormat("yyyyMMddHHmmss", Locale.US)
@@ -34,6 +40,7 @@ object XmltvParser {
         parser.setFeature(XmlPullParser.FEATURE_PROCESS_NAMESPACES, false)
         parser.setInput(src, null)
 
+        lastError = null; lastProgrammeTags = 0; lastDropped = 0; lastFirstStartRaw = null
         var event = parser.eventType
         var channel: String? = null
         var start = 0L
@@ -50,7 +57,9 @@ object XmltvParser {
                 XmlPullParser.START_TAG -> when (parser.name) {
                     "programme" -> {
                         inProgramme = true
+                        lastProgrammeTags++
                         channel = parser.getAttributeValue(null, "channel")
+                        if (lastFirstStartRaw == null) lastFirstStartRaw = parser.getAttributeValue(null, "start")
                         start = parseTime(parser.getAttributeValue(null, "start"))
                         stop = parseTime(parser.getAttributeValue(null, "stop"))
                         title = null; desc = null
@@ -72,6 +81,7 @@ object XmltvParser {
                     "title", "desc" -> current = null
                     "programme" -> {
                         val ch = channel
+                        if (ch == null || start <= 0L || start > toMs || (stop > start && stop < fromMs)) lastDropped++
                         if (ch != null && start > 0 && start <= toMs) {
                             if (stop > start) {
                                 if (stop >= fromMs) out += EpgProgram(channelId = ch, title = title ?: "Programme", description = desc, start = start, stop = stop)
@@ -87,6 +97,7 @@ object XmltvParser {
             event = parser.next()
         } } catch (e: Exception) {
             // Guide tronqué ou balise mal formée : on garde les programmes déjà lus.
+            lastError = (e.javaClass.simpleName + ": " + e.message).take(200)
         }
         if (open.isNotEmpty()) {
             val startsByChannel = (out + open).groupBy({ it.channelId }, { it.start }).mapValues { it.value.sorted() }

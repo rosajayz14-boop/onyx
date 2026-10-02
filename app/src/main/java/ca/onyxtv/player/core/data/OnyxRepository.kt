@@ -207,17 +207,55 @@ class OnyxRepository(
             sb.append("  Adresse : ${maskUrl(url)}\n")
             val probe = ca.onyxtv.player.core.net.StreamProbe.probe(url)
             sb.append("  Réponse serveur : ${probe?.let { "HTTP ${it.code} ${it.contentType?.substringBefore(';') ?: ""} ${it.length?.let { l -> ca.onyxtv.player.core.net.StreamProbe.fmtSize(l) } ?: ""}" } ?: "injoignable (délai dépassé ?)"}\n")
-            val t0 = System.currentTimeMillis()
-            val all = runCatching { xmltv(url, force = true) }
-            val list = all.getOrNull()
-            if (list == null) { sb.append("  Téléchargement/analyse : ÉCHEC — ${all.exceptionOrNull()?.let { Http.describe(it) }}\n"); continue }
-            val secs = (System.currentTimeMillis() - t0) / 1000
-            if (list.isEmpty()) {
-                sb.append("  Analyse : 0 programme en ${secs} s. Le fichier n'est pas un XMLTV lisible, ou ne couvre pas les 48 prochaines heures.\n")
-                continue
-            }
+            // Téléchargement brut dans un fichier : taille réelle, premiers caractères, balises.
+            val tmp = java.io.File(Http.tempDir ?: java.io.File(System.getProperty("java.io.tmpdir")), "epg-test-${System.nanoTime()}.xml")
+            try {
+                val t0 = System.currentTimeMillis()
+                val dl = runCatching { Http.getToFile(url, tmp) }
+                if (dl.isFailure) { sb.append("  Téléchargement : ÉCHEC — ${dl.exceptionOrNull()?.let { Http.describe(it) }}\n"); continue }
+                val secs = (System.currentTimeMillis() - t0) / 1000
+                val size = tmp.length()
+                val headBytes = tmp.inputStream().use { input ->
+                    val buf = ByteArray(400); var n = 0
+                    while (n < buf.size) { val r = input.read(buf, n, buf.size - n); if (r < 0) break; n += r }
+                    buf.copyOf(n)
+                }
+                val gz = headBytes.size >= 2 && headBytes[0] == 0x1f.toByte() && headBytes[1] == 0x8b.toByte()
+                val head = if (gz) "(gzip)" else String(headBytes, Charsets.UTF_8).replace(Regex("\\s+"), " ").take(220)
+                sb.append("  Fichier : ${ca.onyxtv.player.core.net.StreamProbe.fmtSize(size)} en ${secs} s${if (gz) " · compressé gzip" else ""}\n")
+                sb.append("  Début : ${head}\n")
+                val nowMs = System.currentTimeMillis()
+                val windowed = runCatching { tmp.inputStream().buffered().use { XmltvParser.parse(it, nowMs - 6 * 3_600_000L, nowMs + 48 * 3_600_000L) } }.getOrDefault(emptyList())
+                val tags = XmltvParser.lastProgrammeTags
+                val err = XmltvParser.lastError
+                val firstStart = XmltvParser.lastFirstStartRaw
+                sb.append("  Balises <programme> lues : $tags · gardées (fenêtre −6 h / +48 h) : ${windowed.size} · écartées : ${XmltvParser.lastDropped}\n")
+                if (firstStart != null) sb.append("  Premier horodatage brut : « $firstStart »\n")
+                if (err != null) sb.append("  Erreur du parseur : $err\n")
+                if (tags == 0) {
+                    sb.append("  → Le fichier ne contient AUCUN programme : le panneau ne fournit pas d'EPG pour ce compte (ou renvoie un guide vide). Demandez au fournisseur si l'EPG est inclus.\n")
+                } else if (windowed.isEmpty()) {
+                    sb.append("  → Des programmes existent mais aucun dans les 48 h à venir : dates mal lues (format ci-dessus) ou guide périmé.\n")
+                }
+                val list = windowed
+                if (list.isEmpty()) {
+                    // Secours now/next du panneau (get_short_epg) sur 3 chaînes.
+                    if (src is PlaylistSource.Xtream) {
+                        val mine = channels.filter { it.id.startsWith("xt:${src.id}:") }.take(3)
+                        mine.forEach { c ->
+                            val r = runCatching { c.streamId?.let { xt.shortEpg(src, it, 8) }.orEmpty() }
+                            sb.append("  get_short_epg « ${c.name} » : ${r.getOrNull()?.size?.let { "$it programmes" } ?: ("ERREUR " + r.exceptionOrNull()?.let { Http.describe(it) })}\n")
+                        }
+                    }
+                    continue
+                }
+                // Le cache mémoire/disque est rafraîchi avec ce téléchargement (pas de 2e téléchargement).
+                runCatching { xmltv(url, force = true) }
+            } finally { tmp.delete() }
+            val list = runCatching { xmltvIndex(url) }.getOrDefault(emptyMap()).values.flatten()
+            if (list.isEmpty()) { sb.append("  (index vide après analyse)\n"); continue }
             val ids = list.mapTo(HashSet()) { it.channelId }
-            sb.append("  Analyse : ${list.size} programmes · ${ids.size} chaînes · du ${fmt.format(java.util.Date(list.minOf { it.start }))} au ${fmt.format(java.util.Date(list.maxOf { it.stop }))} (${secs} s)\n")
+            sb.append("  Analyse : ${list.size} programmes · ${ids.size} chaînes · du ${fmt.format(java.util.Date(list.minOf { it.start }))} au ${fmt.format(java.util.Date(list.maxOf { it.stop }))}\n")
             val idx = xmltvIndex(url)
             val prefix = if (src is PlaylistSource.Xtream) "xt:${src.id}:" else "m3u:${src.id}:"
             val mine = channels.filter { it.id.startsWith(prefix) }
