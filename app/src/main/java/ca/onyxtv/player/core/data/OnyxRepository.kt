@@ -232,6 +232,28 @@ class OnyxRepository(
         if (sources.isEmpty()) return@withContext "Aucune source configurée."
         val sb = StringBuilder()
         val fmt = java.text.SimpleDateFormat("dd/MM HH:mm", java.util.Locale.getDefault())
+        // ===== VERDICT EN HAUT (lisible sans défiler) : l'API du panneau a-t-elle un guide en direct ? =====
+        val nowTop = System.currentTimeMillis()
+        sources.filterIsInstance<PlaylistSource.Xtream>().firstOrNull()?.let { src ->
+            val scan = channels.filter { it.id.startsWith("xt:${src.id}:") && it.streamId != null }.take(40)
+            var any = 0; var fut = 0; var ex = ""
+            scan.forEach { c ->
+                val r = runCatching { xt.shortEpg(src, c.streamId!!, 8) }.getOrDefault(emptyList())
+                if (r.isNotEmpty()) any++
+                r.firstOrNull { it.stop > nowTop }?.let { if (fut++ == 0) ex = "${c.name} → ${fmt.format(java.util.Date(it.start))} ${it.title}" }
+            }
+            sb.append("═══ RÉSULTAT ═══
+")
+            sb.append("API panneau (get_short_epg) sur ${scan.size} chaînes : $any avec données · $fut à venir
+")
+            if (fut > 0) sb.append("✓ EPG en direct disponible — ex. $ex
+")
+            else sb.append("✗ Aucune chaîne n'a d'EPG à venir via l'API du panneau.
+")
+            sb.append("════════════════
+
+")
+        }
         // En-tête du M3U du compte : adresse du guide « officielle » du fournisseur.
         sources.filterIsInstance<PlaylistSource.Xtream>().forEach { src ->
             val tvg = runCatching { discoverTvgUrl(src) }.getOrNull()
