@@ -150,13 +150,13 @@ fun GuideScreen(vm: OnyxViewModel, onPlay: (PlayTarget) -> Unit) {
     Column(Modifier.fillMaxSize().padding(start = 24.dp, end = 24.dp, top = 20.dp, bottom = 12.dp)) {
         val epgStatus by vm.epgStatus.collectAsStateWithLifecycle()
         epgStatus?.let { st ->
-            val stale = st.coverageEnd in 1 until now
-            if (st.matched == 0 || stale || prefs.diagnostics) {
+            val stale = st.coverageEnd in 1 until now && !st.tableWorks
+            if ((st.matched == 0 && !st.tableWorks) || stale || prefs.diagnostics) {
                 val endTxt = java.text.SimpleDateFormat("EEE d MMM HH:mm", java.util.Locale.getDefault()).format(java.util.Date(st.coverageEnd))
                 Text(
                     when {
                         st.programmes == 0 -> "Guide vide : ${st.detail.ifBlank { "le serveur n'a renvoyé aucun programme" }} — Réglages → « Tester le guide » pour le détail."
-                        stale -> "Le guide du fournisseur s'arrête le $endTxt (périmé côté serveur). Ajoutez un guide supplémentaire : Réglages → votre compte → « URL du guide supplémentaire »."
+                        stale -> "L'export xmltv du fournisseur s'arrête le $endTxt et l'API par chaîne ne répond pas : guide périmé côté serveur. Réglages → « Tester le guide », ou ajoutez un guide supplémentaire sur votre compte."
                         else -> "Guide : ${st.programmes} programmes · ${st.guideChannels} chaînes · appariées ${st.matched}/${st.checked}" +
                             (if (st.matched == 0) " — aucune chaîne du compte ne correspond aux identifiants du guide (Réglages → « Tester le guide »)." else "")
                     },

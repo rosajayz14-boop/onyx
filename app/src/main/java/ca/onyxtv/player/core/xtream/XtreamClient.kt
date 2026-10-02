@@ -277,8 +277,18 @@ class XtreamClient(
      * les dates « start » / « end » (yyyy-MM-dd HH:mm:ss). Titres/descriptions en Base64 OU en clair.
      */
     suspend fun shortEpg(src: PlaylistSource.Xtream, streamId: String, limit: Int = 8): List<EpgProgram> =
+        epgListings(src, "get_short_epg", "&stream_id=$streamId&limit=$limit", streamId)
+
+    /**
+     * EPG COMPLET d'une chaîne (passé + jours à venir) lu directement dans la base du panneau :
+     * c'est ce qu'utilisent les lecteurs du marché quand l'export xmltv.php est tronqué/périmé.
+     */
+    suspend fun simpleDataTable(src: PlaylistSource.Xtream, streamId: String): List<EpgProgram> =
+        epgListings(src, "get_simple_data_table", "&stream_id=$streamId", streamId)
+
+    private suspend fun epgListings(src: PlaylistSource.Xtream, action: String, extra: String, streamId: String): List<EpgProgram> =
         withContext(Dispatchers.IO) {
-            val root = runCatching { json.parseToJsonElement(Http.get(api(src, "get_short_epg", "&stream_id=$streamId&limit=$limit"))) }.getOrNull()
+            val root = runCatching { json.parseToJsonElement(Http.get(api(src, action, extra))) }.getOrNull()
             val listings = ((root as? JsonObject)?.get("epg_listings") as? JsonArray)
                 ?: (root as? JsonArray)   // certains panneaux renvoient directement un tableau
                 ?: return@withContext emptyList()

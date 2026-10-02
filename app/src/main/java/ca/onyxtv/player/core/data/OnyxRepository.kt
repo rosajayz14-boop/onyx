@@ -168,7 +168,7 @@ class OnyxRepository(
     }
 
     /** État du guide, calculé au préchargement : affiché dans le Guide TV quand il est vide. */
-    data class EpgStatus(val programmes: Int, val guideChannels: Int, val matched: Int, val checked: Int, val detail: String, val coverageEnd: Long = 0L)
+    data class EpgStatus(val programmes: Int, val guideChannels: Int, val matched: Int, val checked: Int, val detail: String, val coverageEnd: Long = 0L, val tableWorks: Boolean = false)
     private val _epgStatus = kotlinx.coroutines.flow.MutableStateFlow<EpgStatus?>(null)
     val epgStatus: kotlinx.coroutines.flow.StateFlow<EpgStatus?> = _epgStatus
 
@@ -188,7 +188,14 @@ class OnyxRepository(
             matched += sample.count { matchInIndex(idx, it.epgChannelId, it.name).isNotEmpty() }
         }
         if (epgUrls().isEmpty()) details += "aucune adresse de guide (compte Xtream absent, liste M3U sans url-tvg)"
-        _epgStatus.value = EpgStatus(programmes, guideChannels, matched, checked, details.joinToString(" · "), coverageEnd)
+        // La base EPG du panneau répond-elle pour l'avenir ? (une chaîne avec identifiant EPG)
+        var tableWorks = false
+        store.sources.first().filterIsInstance<PlaylistSource.Xtream>().forEach { src ->
+            val c = channels.firstOrNull { it.id.startsWith("xt:${src.id}:") && !it.epgChannelId.isNullOrBlank() && it.streamId != null } ?: return@forEach
+            val t = runCatching { xt.simpleDataTable(src, c.streamId!!) }.getOrDefault(emptyList())
+            if (t.any { it.stop > System.currentTimeMillis() }) tableWorks = true
+        }
+        _epgStatus.value = EpgStatus(programmes, guideChannels, matched, checked, details.joinToString(" · "), coverageEnd, tableWorks)
     }
 
     private fun maskUrl(url: String) = url.replace(Regex("(password=)[^&]+"), "$1•••")
@@ -248,13 +255,17 @@ class OnyxRepository(
                 } else if (windowed.isEmpty()) {
                     sb.append("  → Des programmes existent mais aucun dans les 48 h à venir : dates mal lues (format ci-dessus) ou guide périmé.\n")
                 }
-                // Secours now/next du panneau (get_short_epg), toujours testé sur 3 chaînes.
-                if (src is PlaylistSource.Xtream) {
-                    val mine = channels.filter { it.id.startsWith("xt:${src.id}:") }.take(3)
+                // API par chaîne du panneau (base EPG) : testée sur 3 chaînes AVEC identifiant EPG (CA| d'abord).
+                if (src is PlaylistSource.Xtream && label == src.label) {
+                    val withId = channels.filter { it.id.startsWith("xt:${src.id}:") && !it.epgChannelId.isNullOrBlank() && it.streamId != null }
+                    val mine = (withId.filter { it.name.trim().startsWith("CA", true) } + withId).distinctBy { it.id }.take(3)
+                    if (mine.isEmpty()) sb.append("  Aucune chaîne du compte n'a d'identifiant EPG : l'API par chaîne ne peut rien renvoyer.\n")
+                    fun describe(r: Result<List<EpgProgram>>) = r.getOrNull()?.let { l ->
+                        if (l.isEmpty()) "0 programme" else "${l.size} programmes (${fmt.format(java.util.Date(l.first().start))} → ${fmt.format(java.util.Date(l.last().stop))})"
+                    } ?: ("ERREUR " + r.exceptionOrNull()?.let { Http.describe(it) })
                     mine.forEach { c ->
-                        val r = runCatching { c.streamId?.let { xt.shortEpg(src, it, 8) }.orEmpty() }
-                        val got = r.getOrNull()
-                        sb.append("  get_short_epg « ${c.name} » : " + (got?.let { l -> if (l.isEmpty()) "0 programme" else "${l.size} programmes (${fmt.format(java.util.Date(l.first().start))} → ${fmt.format(java.util.Date(l.last().stop))})" } ?: ("ERREUR " + r.exceptionOrNull()?.let { Http.describe(it) })) + "\n")
+                        sb.append("  « ${c.name} » [${c.epgChannelId}] · get_simple_data_table : ${describe(runCatching { xt.simpleDataTable(src, c.streamId!!) })}\n")
+                        sb.append("      get_short_epg : ${describe(runCatching { xt.shortEpg(src, c.streamId!!, 8) })}\n")
                     }
                 }
                 val list = windowed
@@ -356,7 +367,15 @@ class OnyxRepository(
                     val idx2 = runCatching { xmltvIndex(extra) }.getOrDefault(emptyMap())
                     fromXmltv = freshest(fromXmltv, matchInIndex(idx2, channel.epgChannelId, channel.name))
                 }
-                if (fromXmltv.isNotEmpty()) return@run fromXmltv.sortedBy { it.start }
+                // Base EPG du panneau (get_simple_data_table) : souvent plus à jour que l'export xmltv.
+                // On ne l'interroge que si le xmltv ne couvre pas les prochaines heures.
+                val horizon = now + 3 * 3_600_000L
+                var best = fromXmltv
+                if (best.none { it.stop >= horizon }) {
+                    val table = runCatching { xt.simpleDataTable(src, sid) }.getOrDefault(emptyList())
+                    best = freshest(best, table)
+                }
+                if (best.isNotEmpty()) return@run best.sortedBy { it.start }
                 val short = runCatching { xt.shortEpg(src, sid, limit = 24) }.getOrDefault(emptyList())
                 return@run short.sortedBy { it.start }
             }
