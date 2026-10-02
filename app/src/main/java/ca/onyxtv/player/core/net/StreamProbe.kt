@@ -26,7 +26,7 @@ object StreamProbe {
         fun summary(): String = buildString {
             append("HTTP ").append(code)
             contentType?.let { append(' ').append(it.substringBefore(';').trim()) }
-            length?.let { append(" · ").append(fmtSize(it)) }
+            this@Result.length?.let { append(" · ").append(fmtSize(it)) }   // (StringBuilder.length masque la propriété)
             append(" · plages ").append(if (acceptRanges) "OK" else "NON")
             append(" · ").append(kind.name)
             if (finalUrl.startsWith("https://")) append(" · https")
