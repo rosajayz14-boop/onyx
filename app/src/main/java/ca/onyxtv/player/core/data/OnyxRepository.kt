@@ -331,6 +331,19 @@ class OnyxRepository(
                         sb.append("  Réponse brute get_short_epg « ${c.name} » : ${xt.epgRaw(src, "get_short_epg", c.streamId!!)}\n")
                         sb.append("  Réponse brute get_simple_data_table : ${xt.epgRaw(src, "get_simple_data_table", c.streamId!!)}\n")
                     }
+                    // Balayage LARGE : get_short_epg sur jusqu'à 40 chaînes, combien ont un programme À VENIR ?
+                    val nowScan = System.currentTimeMillis()
+                    val scan = (channels.filter { it.id.startsWith("xt:${src.id}:") && it.streamId != null }).take(40)
+                    var withAny = 0; var withFuture = 0; var example = ""
+                    scan.forEach { c ->
+                        val r = runCatching { xt.shortEpg(src, c.streamId!!, 8) }.getOrDefault(emptyList())
+                        if (r.isNotEmpty()) withAny++
+                        val fut = r.firstOrNull { it.stop > nowScan }
+                        if (fut != null) { withFuture++; if (example.isEmpty()) example = "${c.name} → ${fmt.format(java.util.Date(fut.start))} ${fut.title}" }
+                    }
+                    sb.append("  Balayage get_short_epg sur ${scan.size} chaînes : $withAny avec des données · $withFuture avec un programme à venir\n")
+                    if (example.isNotEmpty()) sb.append("  Exemple actuel : $example\n")
+                    else sb.append("  → Aucune des ${scan.size} chaînes testées n'a d'EPG à venir via l'API du panneau.\n")
                     mine.forEach { c ->
                         sb.append("  « ${c.name} » [${c.epgChannelId}] · dans le fichier xmltv : ${rawCounts[c.epgChannelId] ?: 0} programme(s)\n")
                         sb.append("      get_simple_data_table : ${describe(runCatching { xt.simpleDataTable(src, c.streamId!!) })}\n")
