@@ -66,7 +66,7 @@ object UpdateChecker {
         val dir = File(context.cacheDir, "update").apply { mkdirs() }
         val file = File(dir, "onyx-update.apk")
         val request = Request.Builder().url(BuildConfig.UPDATE_APK_URL).header("User-Agent", "ONYX-TV/1.0 (Android TV)").build()
-        Http.client.newCall(request).execute().use { resp ->
+        Http.bulk.newCall(request).execute().use { resp ->
             if (!resp.isSuccessful) throw IOException("HTTP ${resp.code}")
             val body = resp.body ?: throw IOException("Réponse vide")
             val total = body.contentLength()
@@ -100,12 +100,37 @@ object UpdateChecker {
         }
     }
 
+    /**
+     * L'APK téléchargé est-il signé avec la même clé que l'app installée ? Sinon Android refuse
+     * l'installation (« Application non installée ») sans explication : on prévient avant.
+     * null = impossible à déterminer (on laisse l'installateur trancher).
+     */
+    @Suppress("DEPRECATION")
+    fun sameSigner(context: Context, file: File): Boolean? = runCatching {
+        val pm = context.packageManager
+        fun sigs(info: android.content.pm.PackageInfo?): Set<String>? =
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) info?.signingInfo?.apkContentsSigners?.map { it.toCharsString() }?.toSet()
+            else info?.signatures?.map { it.toCharsString() }?.toSet()
+        val flag = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) android.content.pm.PackageManager.GET_SIGNING_CERTIFICATES
+                   else android.content.pm.PackageManager.GET_SIGNATURES
+        val a = sigs(pm.getPackageArchiveInfo(file.absolutePath, flag)) ?: return@runCatching null
+        val b = sigs(pm.getPackageInfo(context.packageName, flag)) ?: return@runCatching null
+        a == b
+    }.getOrNull()
+
     /** Lance l'installateur système sur l'APK téléchargé. */
     fun install(context: Context, file: File) {
-        val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
-        val i = Intent(Intent.ACTION_VIEW)
-            .setDataAndType(uri, "application/vnd.android.package-archive")
-            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        val i = Intent(Intent.ACTION_VIEW).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+            i.setDataAndType(uri, "application/vnd.android.package-archive").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        } else {
+            // Avant Android 7 (Fire OS 5), l'installateur n'accepte que file:// — copie dans un dossier lisible.
+            val pub = File(context.externalCacheDir ?: context.cacheDir, "onyx-update.apk")
+            file.copyTo(pub, overwrite = true)
+            pub.setReadable(true, false)
+            i.setDataAndType(Uri.fromFile(pub), "application/vnd.android.package-archive")
+        }
         context.startActivity(i)
     }
 }

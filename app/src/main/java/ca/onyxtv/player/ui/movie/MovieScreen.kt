@@ -170,7 +170,15 @@ fun MovieScreen(
 
                 (d?.plot ?: item.plot)?.takeIf { it.isNotBlank() }?.let {
                     Text("Synopsis", color = OnyxCyan, style = MaterialTheme.typography.titleMedium)
-                    Text(it, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.padding(top = 4.dp, bottom = 14.dp))
+                    // Un texte seul n'est pas atteignable à la télécommande : on tronque et on
+                    // place un bouton APRÈS le texte (le focus l'amène à l'écran, texte compris).
+                    var expanded by remember(item.id) { mutableStateOf(false) }
+                    Text(it, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = if (expanded) Int.MAX_VALUE else 5, overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(top = 4.dp, bottom = 8.dp))
+                    if (it.length > 320) Button(onClick = { expanded = !expanded }, modifier = Modifier.padding(bottom = 12.dp)) {
+                        Text(if (expanded) "Réduire" else "Lire la suite")
+                    }
                 }
                 d?.director?.takeIf { it.isNotBlank() }?.let {
                     Text("Réalisation", color = OnyxCyan, style = MaterialTheme.typography.titleMedium)

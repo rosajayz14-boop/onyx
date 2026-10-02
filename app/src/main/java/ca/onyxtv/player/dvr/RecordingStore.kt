@@ -47,35 +47,33 @@ class RecordingStore(private val context: Context) {
             .sortedByDescending { it.startedAt }
     }
 
-    suspend fun upsert(info: RecordingInfo) {
-        val next = recordings.first().filterNot { it.id == info.id } + info
-        context.dvrDataStore.edit { it[key] = json.encodeToString(serializer, next) }
+    // Toutes les écritures lisent la liste DANS la transaction edit{} : deux enregistrements
+    // parallèles (progression toutes les 5 s) n'écrasent plus l'état final l'un de l'autre.
+    private suspend fun modify(transform: (List<RecordingInfo>) -> List<RecordingInfo>) {
+        context.dvrDataStore.edit { p ->
+            val current = runCatching { p[key]?.let { json.decodeFromString(serializer, it) } }.getOrNull().orEmpty()
+            p[key] = json.encodeToString(serializer, transform(current))
+        }
     }
 
-    suspend fun update(id: String, transform: (RecordingInfo) -> RecordingInfo) {
-        val current = recordings.first()
-        val target = current.firstOrNull { it.id == id } ?: return
-        upsert(transform(target))
-    }
+    suspend fun upsert(info: RecordingInfo) = modify { cur -> cur.filterNot { it.id == info.id } + info }
+
+    suspend fun update(id: String, transform: (RecordingInfo) -> RecordingInfo) =
+        modify { cur -> cur.map { if (it.id == id) transform(it) else it } }
 
     /** Supprime l'entrée et le fichier associé. */
     suspend fun delete(id: String) {
-        val current = recordings.first()
-        current.firstOrNull { it.id == id }?.let { runCatching { File(it.filePath).delete() } }
-        val next = current.filterNot { it.id == id }
-        context.dvrDataStore.edit { it[key] = json.encodeToString(serializer, next) }
+        recordings.first().firstOrNull { it.id == id }?.let { runCatching { File(it.filePath).delete() } }
+        modify { cur -> cur.filterNot { it.id == id } }
     }
 
     /** Au démarrage : tout ce qui est encore marqué RECORDING sans service actif est un arrêt brutal. */
-    suspend fun markInterrupted() {
-        val current = recordings.first()
-        if (current.none { it.status == RecordingStatus.RECORDING }) return
-        val next = current.map {
+    suspend fun markInterrupted() = modify { cur ->
+        cur.map {
             if (it.status == RecordingStatus.RECORDING)
                 it.copy(status = RecordingStatus.STOPPED, endedAt = it.endedAt ?: System.currentTimeMillis())
             else it
         }
-        context.dvrDataStore.edit { it[key] = json.encodeToString(serializer, next) }
     }
 
     companion object {

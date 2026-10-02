@@ -84,7 +84,7 @@ private val cardBrushes = listOf(
     listOf(Color(0xFF4A1030), Color(0xFF10061E)),
 ).map { Brush.linearGradient(it) }
 
-fun brushFor(seed: String): Brush = cardBrushes[abs(seed.hashCode()) % cardBrushes.size]
+fun brushFor(seed: String): Brush = cardBrushes[Math.floorMod(seed.hashCode(), cardBrushes.size)]
 
 @Composable
 fun Thumbnail(
@@ -221,7 +221,7 @@ fun Rail(
         RailHeader(title, badge)
         LazyRow(
             horizontalArrangement = Arrangement.spacedBy(16.dp),
-            contentPadding = PaddingValues(vertical = 10.dp, horizontal = 2.dp),
+            contentPadding = PaddingValues(vertical = 12.dp, horizontal = 12.dp),   // marge pour la carte agrandie au focus
             content = content,
         )
     }

@@ -25,10 +25,10 @@ object M3uParser {
         val number: Int?,
     )
 
-    fun parse(content: String): List<Channel> {
+    fun parse(content: String, sourceId: String = ""): List<Channel> {
         val out = ArrayList<Channel>()
         var pending: Pending? = null
-        var seq = 0
+        val seen = HashMap<String, Int>()
 
         content.lineSequence().forEach { raw ->
             val line = raw.trim()
@@ -44,7 +44,7 @@ object M3uParser {
                     val p = pending
                     if (p != null) {
                         out += Channel(
-                            id = buildId(p.tvgId, p.name, line, seq++),
+                            id = buildId(sourceId, p.tvgId, p.name, line, seen),
                             number = p.number,
                             name = p.name,
                             logoUrl = p.logo?.takeIf { it.isNotBlank() },
@@ -79,8 +79,15 @@ object M3uParser {
         )
     }
 
-    private fun buildId(tvgId: String?, name: String, url: String, seq: Int): String {
-        val base = tvgId?.takeIf { it.isNotBlank() } ?: name
-        return "m3u:$base:${url.hashCode()}:$seq"
+    /**
+     * Identifiant STABLE : source + (tvg-id ou nom) + URL. L'ancien suffixe de position changeait
+     * tous les ids dès qu'une ligne était insérée en amont (favoris et reprises perdus) ; et sans
+     * la source, deux listes M3U pouvaient produire le même id (clé en double -> plantage).
+     */
+    private fun buildId(sourceId: String, tvgId: String?, name: String, url: String, seen: HashMap<String, Int>): String {
+        val base = (tvgId?.takeIf { it.isNotBlank() } ?: name).lowercase().replace(Regex("[^a-z0-9]"), "")
+        val core = "m3u:$sourceId:$base:${Integer.toHexString(url.hashCode())}"
+        val n = (seen[core] ?: 0).also { seen[core] = it + 1 }
+        return if (n == 0) core else "$core:$n"
     }
 }

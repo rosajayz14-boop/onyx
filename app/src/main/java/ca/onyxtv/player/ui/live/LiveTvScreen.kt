@@ -104,7 +104,10 @@ fun LiveTvScreen(vm: OnyxViewModel, onPlay: (PlayTarget) -> Unit) {
             else -> channels.filter { it.groupTitle == group }
         }
     }
-    var selected by remember(filtered) { mutableStateOf(filtered.firstOrNull()) }
+    // Id sélectionné stable : un changement de la liste (favori ajouté/retiré) ne ramène plus
+    // la sélection sur la première chaîne alors que le focus est ailleurs.
+    var selectedId by remember { mutableStateOf<String?>(null) }
+    val selected = remember(filtered, selectedId) { filtered.firstOrNull { it.id == selectedId } ?: filtered.firstOrNull() }
 
     fun selectGroup(g: String) {
         if (g in hidden) pendingLocked = g else group = g
@@ -168,7 +171,7 @@ fun LiveTvScreen(vm: OnyxViewModel, onPlay: (PlayTarget) -> Unit) {
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(vertical = 4.dp)
-                                .onFocusChanged { if (it.isFocused) selected = c },
+                                .onFocusChanged { if (it.isFocused) selectedId = c.id },
                         )
                     }
                 }
@@ -328,9 +331,7 @@ private fun EpgRow(p: EpgProgram, live: Boolean, catchup: Boolean, onCatchup: ()
             if (catchup) Text("↺ Revoir", color = OnyxCyan, style = MaterialTheme.typography.labelLarge)
         }
     }
-    if (catchup) {
-        Card(onClick = onCatchup, modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) { content() }
-    } else {
-        Box(Modifier.padding(vertical = 6.dp)) { content() }
-    }
+    // Toujours une carte focalisable : sans cela (pas de rattrapage), la liste ne défilait pas
+    // à la télécommande et seuls les premiers programmes étaient visibles.
+    Card(onClick = { if (catchup) onCatchup() }, modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) { content() }
 }

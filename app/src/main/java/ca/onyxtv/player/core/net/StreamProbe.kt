@@ -47,19 +47,20 @@ object StreamProbe {
         runCatching {
             val req = Request.Builder().url(url)
                 .header("User-Agent", "ONYX-TV/1.0 (Android TV)")
-                .header("Range", "bytes=0-4095")
+                .header("Range", "bytes=0-511")
                 .header("Accept-Encoding", "identity")
                 .build()
             probeClient.newCall(req).execute().use { resp ->
-                val head = ByteArray(4096)
+                val head = ByteArray(512)
                 var n = 0
                 resp.body?.byteStream()?.let { input ->
                     runCatching {
+                        // On lit la plage EN ENTIER : la connexion peut être réutilisée au lieu
+                        // d'être jetée (panneaux limités à une connexion).
                         while (n < head.size) {
                             val r = input.read(head, n, head.size - n)
                             if (r < 0) break
                             n += r
-                            if (n >= 512) break   // suffisant pour reconnaître le conteneur
                         }
                     }
                 }

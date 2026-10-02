@@ -30,6 +30,7 @@ import androidx.tv.material3.Button
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import ca.onyxtv.player.core.model.Channel
+import ca.onyxtv.player.core.model.MediaKind
 import ca.onyxtv.player.core.model.VodItem
 import ca.onyxtv.player.player.PlayTarget
 import ca.onyxtv.player.ui.components.EmptyState
@@ -46,6 +47,7 @@ import ca.onyxtv.player.ui.theme.OnyxCyan
 import ca.onyxtv.player.ui.theme.OnyxMuted
 import ca.onyxtv.player.viewmodel.OnyxViewModel
 import ca.onyxtv.player.viewmodel.hiddenGroups
+import ca.onyxtv.player.viewmodel.hiddenIds
 import coil.compose.AsyncImage
 
 @Composable
@@ -95,7 +97,10 @@ fun HomeScreen(
         return
     }
 
-    val resumable = remember(recents) { recents.filter { it.resumable } }
+    // Les contenus des catégories verrouillées ne doivent pas réapparaître via « Reprendre ».
+    val hiddenIdSet = remember(state.channels, state.vod, hidden) { hiddenIds(state.channels, state.vod, hidden) }
+    val visibleRecents = remember(recents, hiddenIdSet) { if (hiddenIdSet.isEmpty()) recents else recents.filterNot { it.id in hiddenIdSet } }
+    val resumable = remember(visibleRecents) { visibleRecents.filter { it.resumable } }
     val favChannels = remember(channels, favorites) { channels.filter { it.id in favorites } }
     // Appui long sur une carte film/série : favoris en premier, puis fiche / lecture.
     val vodLongPress: (VodItem) -> Unit = { v ->
@@ -109,6 +114,8 @@ fun HomeScreen(
     val recommended = remember(recommendedAll, hidden) { recommendedAll.filterNot { it.category in hidden } }
     val tmdbAll by vm.tmdbSuggestions.collectAsStateWithLifecycle()
     val tmdb = remember(tmdbAll, hidden) { tmdbAll.filterNot { it.category in hidden } }
+    // Les panneaux Xtream renvoient les films du plus ancien au plus récent : la fin de liste = derniers ajouts.
+    val newMovies = remember(vod) { vod.asReversed().asSequence().filter { it.kind == MediaKind.MOVIE }.take(24).toList() }
 
     // Mise en avant : reprise en cours > film recommandé > première chaîne.
     val heroResume = resumable.firstOrNull()
@@ -140,7 +147,7 @@ fun HomeScreen(
         contentPadding = PaddingValues(top = 28.dp, bottom = 36.dp),
     ) {
         update.info?.let { info ->
-            item {
+            item(key = "update") {
                 Text(
                     "✨ Nouvelle version disponible (${info.label}) — Réglages → Application pour l'installer.",
                     color = OnyxCyan,
@@ -150,7 +157,7 @@ fun HomeScreen(
             }
         }
         if (state.loading && state.hasContent) {
-            item {
+            item(key = "updating") {
                 Text(
                     "Mise à jour en cours… ${state.progress ?: ""}",
                     color = OnyxMuted,
@@ -160,14 +167,14 @@ fun HomeScreen(
             }
         }
         if (state.sourceErrors.isNotEmpty() && !state.loading) {
-            item {
+            item(key = "error") {
                 Column(Modifier.padding(bottom = 12.dp)) {
                     ErrorBanner(state.sourceErrors.joinToString("\n"))
                     Button(onClick = { vm.refresh() }, modifier = Modifier.padding(top = 8.dp)) { Text("Réessayer la mise à jour") }
                 }
             }
         }
-        item {
+        item(key = "hero") {
             Hero(
                 kicker = heroKicker,
                 title = heroTitle,
@@ -177,10 +184,10 @@ fun HomeScreen(
                 onLive = onGoLive,
             )
         }
-        if (recents.isNotEmpty()) {
-            item {
+        if (visibleRecents.isNotEmpty()) {
+            item(key = "resume") {
                 Rail("Reprendre") {
-                    items(recents.take(20), key = { it.id }) { r ->
+                    items(visibleRecents.take(20), key = { it.id }) { r ->
                         MediaCard(
                             title = r.title,
                             subtitle = r.subtitle,
@@ -212,7 +219,7 @@ fun HomeScreen(
             }
         }
         if (favChannels.isNotEmpty() || favVod.isNotEmpty()) {
-            item {
+            item(key = "favorites") {
                 Rail("Mes favoris", badge = "★") {
                     items(favChannels, key = { "c" + it.id }) { c ->
                         MediaCard(
@@ -243,7 +250,7 @@ fun HomeScreen(
             }
         }
         if (channels.isNotEmpty()) {
-            item {
+            item(key = "live") {
                 Rail("En direct maintenant") {
                     items(channels.take(24), key = { it.id }) { c ->
                         MediaCard(
@@ -260,7 +267,7 @@ fun HomeScreen(
             }
         }
         if (tmdb.isNotEmpty()) {
-            item {
+            item(key = "tmdb") {
                 Rail("Tendances de la semaine", badge = "TMDB") {
                     items(tmdb, key = { "t" + it.id }) { v ->
                         MediaCard(
@@ -279,7 +286,7 @@ fun HomeScreen(
             }
         }
         if (recommended.isNotEmpty()) {
-            item {
+            item(key = "recommended") {
                 Rail("Recommandé pour vous", badge = "ONYX") {
                     items(recommended, key = { it.id }) { v ->
                         MediaCard(
@@ -298,9 +305,9 @@ fun HomeScreen(
             }
         }
         if (vod.isNotEmpty()) {
-            item {
-                Rail("Nouveautés films") {
-                    items(vod.asReversed().take(24), key = { "n" + it.id }) { v ->
+            item(key = "new") {
+                Rail("Ajouts récents · films") {
+                    items(newMovies, key = { "n" + it.id }) { v ->
                         MediaCard(
                             title = v.name,
                             subtitle = v.category ?: v.year,

@@ -43,7 +43,7 @@ class CatalogRefreshWorker(context: Context, params: WorkerParameters) : Corouti
                 .setInitialDelay(24, TimeUnit.HOURS)
                 .build()
             WorkManager.getInstance(context)
-                .enqueueUniquePeriodicWork(NAME, ExistingPeriodicWorkPolicy.KEEP, request)
+                .enqueueUniquePeriodicWork(NAME, ExistingPeriodicWorkPolicy.UPDATE, request)
         }
     }
 }

@@ -110,7 +110,7 @@ fun VodScreen(
         LazyVerticalGrid(
             columns = GridCells.Adaptive(140.dp),
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(vertical = 16.dp),
+            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
@@ -142,9 +142,10 @@ fun VodScreen(
 @Composable
 private fun CategoryChip(label: String, selected: Boolean, onClick: () -> Unit) {
     Button(onClick = onClick) {
+        // Pas de couleur forcée : au focus, le bouton tv-material passe sur fond clair et le
+        // texte cyan/blanc devenait invisible. La sélection se lit au préfixe.
         Text(
-            label,
-            color = if (selected) OnyxCyan else MaterialTheme.colorScheme.onSurface,
+            if (selected) "● $label" else label,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )

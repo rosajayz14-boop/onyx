@@ -39,7 +39,9 @@ object XmltvParser {
         var start = 0L
         var stop = 0L
         var title: String? = null
+        var titleLang: String? = null
         var desc: String? = null
+        val open = ArrayList<EpgProgram>()   // programmes sans <stop> : clôturés par le suivant
         var inProgramme = false
         var current: String? = null
 
@@ -53,12 +55,16 @@ object XmltvParser {
                         stop = parseTime(parser.getAttributeValue(null, "stop"))
                         title = null; desc = null
                     }
-                    "title", "desc" -> current = parser.name
+                    "title", "desc" -> {
+                        current = parser.name
+                        if (parser.name == "title") titleLang = parser.getAttributeValue(null, "lang")?.lowercase()
+                    }
                 }
                 XmlPullParser.TEXT -> if (inProgramme && current != null) {
                     val text = parser.text?.trim().orEmpty()
                     if (text.isNotEmpty()) when (current) {
-                        "title" -> title = text
+                        // Guides multilingues : on garde le premier titre, sauf si une version « fr » arrive.
+                        "title" -> if (title == null || titleLang?.startsWith("fr") == true) title = text
                         "desc" -> desc = text
                     }
                 }
@@ -66,14 +72,13 @@ object XmltvParser {
                     "title", "desc" -> current = null
                     "programme" -> {
                         val ch = channel
-                        if (ch != null && stop > start && stop >= fromMs && start <= toMs) {
-                            out += EpgProgram(
-                                channelId = ch,
-                                title = title ?: "Programme",
-                                description = desc,
-                                start = start,
-                                stop = stop,
-                            )
+                        if (ch != null && start > 0 && start <= toMs) {
+                            if (stop > start) {
+                                if (stop >= fromMs) out += EpgProgram(channelId = ch, title = title ?: "Programme", description = desc, start = start, stop = stop)
+                            } else if (start >= fromMs - 6 * 3_600_000L) {
+                                // <stop> absent (autorisé par XMLTV) : fin = début du programme suivant.
+                                open += EpgProgram(channelId = ch, title = title ?: "Programme", description = desc, start = start, stop = 0L)
+                            }
                         }
                         inProgramme = false
                     }
@@ -82,6 +87,15 @@ object XmltvParser {
             event = parser.next()
         } } catch (e: Exception) {
             // Guide tronqué ou balise mal formée : on garde les programmes déjà lus.
+        }
+        if (open.isNotEmpty()) {
+            val startsByChannel = (out + open).groupBy({ it.channelId }, { it.start }).mapValues { it.value.sorted() }
+            open.forEach { p ->
+                val starts = startsByChannel[p.channelId].orEmpty()
+                val idx = starts.binarySearch(p.start).let { if (it < 0) -it - 1 else it + 1 }
+                val next = starts.getOrNull(idx) ?: (p.start + 60 * 60_000L)
+                if (next > p.start && next >= fromMs) out += p.copy(stop = next)
+            }
         }
         return out
     }

@@ -83,8 +83,10 @@ class UserStore(private val context: Context) {
     }
 
     suspend fun updatePrefs(transform: (AppPrefs) -> AppPrefs) {
-        val next = transform(prefs.first())
-        context.userDataStore.edit { it[prefsKey] = json.encodeToString(AppPrefs.serializer(), next) }
+        context.userDataStore.edit { p ->
+            val cur = runCatching { p[prefsKey]?.let { json.decodeFromString(AppPrefs.serializer(), it) } }.getOrNull() ?: AppPrefs()
+            p[prefsKey] = json.encodeToString(AppPrefs.serializer(), transform(cur))
+        }
     }
     private val favSer = SetSerializer(String.serializer())
     private val recentSer = ListSerializer(RecentItem.serializer())
@@ -95,8 +97,10 @@ class UserStore(private val context: Context) {
     }
 
     suspend fun updateParental(transform: (ParentalSettings) -> ParentalSettings) {
-        val next = transform(parental.first())
-        context.userDataStore.edit { it[parentalKey] = json.encodeToString(ParentalSettings.serializer(), next) }
+        context.userDataStore.edit { p ->
+            val cur = runCatching { p[parentalKey]?.let { json.decodeFromString(ParentalSettings.serializer(), it) } }.getOrNull() ?: ParentalSettings()
+            p[parentalKey] = json.encodeToString(ParentalSettings.serializer(), transform(cur))
+        }
     }
 
     val favorites: Flow<Set<String>> = context.userDataStore.data.map { prefs ->
@@ -111,9 +115,11 @@ class UserStore(private val context: Context) {
     }
 
     suspend fun toggleFavorite(id: String) {
-        val current = favorites.first()
-        val next = if (id in current) current - id else current + id
-        context.userDataStore.edit { it[favKey] = json.encodeToString(favSer, next) }
+        context.userDataStore.edit { p ->
+            val current = runCatching { p[favKey]?.let { json.decodeFromString(favSer, it) } }.getOrNull().orEmpty()
+            val next = if (id in current) current - id else current + id
+            p[favKey] = json.encodeToString(favSer, next)
+        }
     }
 
     /** Ajoute/met à jour un récent (par id) et conserve les [MAX_RECENTS] plus récents. */
@@ -132,8 +138,10 @@ class UserStore(private val context: Context) {
     }
 
     suspend fun removeRecent(id: String) {
-        val next = recents.first().filterNot { it.id == id }
-        context.userDataStore.edit { it[recentKey] = json.encodeToString(recentSer, next) }
+        context.userDataStore.edit { p ->
+            val current = runCatching { p[recentKey]?.let { json.decodeFromString(recentSer, it) } }.getOrNull().orEmpty()
+            p[recentKey] = json.encodeToString(recentSer, current.filterNot { it.id == id })
+        }
     }
 
     private companion object { const val MAX_RECENTS_LIVE = 20; const val MAX_RECENTS_VOD = 60 }

@@ -41,7 +41,10 @@ class XtreamClient(
      * la plus fréquente) et retire le / final. Ex. "mon.tv:8080/" -> "http://mon.tv:8080".
      */
     private fun base(src: PlaylistSource.Xtream): String {
-        var s = src.server.trim().trimEnd('/')
+        var s = src.server.trim()
+        // URL collée depuis un courriel du fournisseur : on ne garde que le serveur.
+        s = s.replace(Regex("/(player_api|get|xmltv|panel_api)\\.php.*$", RegexOption.IGNORE_CASE), "")
+        s = s.trimEnd('/')
         if (!s.startsWith("http://", true) && !s.startsWith("https://", true)) s = "http://$s"
         return s
     }
@@ -196,7 +199,11 @@ class XtreamClient(
         when (val eps = r.episodes) {
             is JsonObject -> eps.forEach { (key, value) ->
                 val hint = key.toIntOrNull()
-                (value as? JsonArray)?.forEach { addEpisode(it, hint) }
+                when (value) {
+                    is JsonArray -> value.forEach { addEpisode(it, hint) }
+                    is JsonObject -> value.values.forEach { addEpisode(it, hint) }   // {"1": {"0": {...}, "1": {...}}} (tableaux PHP associatifs)
+                    else -> Unit
+                }
             }
             is JsonArray -> eps.forEach { entry ->
                 when (entry) {
@@ -286,10 +293,9 @@ class XtreamClient(
             }.sortedBy { it.start }
         }
 
-    private val epgDateFmt by lazy {
-        java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US)
-            .apply { timeZone = java.util.TimeZone.getTimeZone("UTC") }
-    }
+    // SimpleDateFormat n'est pas thread-safe et shortEpg tourne en parallèle pour plusieurs chaînes.
+    private fun epgDateFmt() = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US)
+        .apply { timeZone = java.util.TimeZone.getTimeZone("UTC") }
 
     /** Millisecondes depuis l'horodatage unix (nombre/texte) ou, à défaut, la date « yyyy-MM-dd HH:mm:ss ». */
     private fun epgMillis(o: JsonObject, tsKey: String, dateKey: String): Long? {
@@ -297,12 +303,21 @@ class XtreamClient(
         // sinon les programmes tombent en l'an 50 000 et sortent de la fenêtre du guide.
         o.str(tsKey)?.trim()?.toLongOrNull()?.let { if (it > 0) return if (it > 100_000_000_000L) it else it * 1000 }
         val d = o.str(dateKey)?.trim()?.takeIf { it.isNotBlank() } ?: return null
-        return runCatching { epgDateFmt.parse(d)?.time }.getOrNull()
+        return runCatching { epgDateFmt().parse(d)?.time }.getOrNull()
     }
 
-    private fun decodeB64(s: String): String = runCatching {
-        String(Base64.decode(s, Base64.DEFAULT))
-    }.getOrDefault(s)
+    private val b64Alphabet = Regex("^[A-Za-z0-9+/=\\s]+$")
+
+    /** Les panneaux encodent titres/descriptions en base64, mais pas tous : un titre en clair
+     *  comme « News » se « décode » en octets illisibles. On ne garde le décodage que s'il est plausible. */
+    private fun decodeB64(s: String): String {
+        val t = s.trim()
+        if (t.isEmpty() || !b64Alphabet.matches(t) || t.replace(Regex("\\s"), "").length % 4 != 0) return s
+        return runCatching {
+            val decoded = String(Base64.decode(t, Base64.DEFAULT), Charsets.UTF_8)
+            if (decoded.any { it.code < 0x20 && it != '\n' && it != '\r' && it != '\t' } || decoded.contains('\uFFFD')) s else decoded
+        }.getOrDefault(s)
+    }
 
     /**
      * Décode une liste élément par élément : un seul enregistrement mal formé (champ d'un

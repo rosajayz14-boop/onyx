@@ -25,7 +25,10 @@ object Http {
 
     /** Client pour les GROS téléchargements (guide xmltv de 100 Mo, catalogues) : pas de limite
      *  globale d'appel (callTimeout), seul le readTimeout protège contre un serveur muet. */
-    private val bulk: OkHttpClient by lazy { client.newBuilder().callTimeout(0, TimeUnit.SECONDS).build() }
+    val bulk: OkHttpClient by lazy { client.newBuilder().callTimeout(15, TimeUnit.MINUTES).build() }
+
+    /** Client pour les flux continus (enregistrement DVR) : AUCUN délai global, seul le readTimeout veille. */
+    val stream: OkHttpClient by lazy { client.newBuilder().callTimeout(0, TimeUnit.SECONDS).readTimeout(60, TimeUnit.SECONDS).build() }
 
     /** Dossier temporaire pour les grosses réponses (défini au démarrage de l'app). */
     @Volatile var tempDir: java.io.File? = null

@@ -52,11 +52,16 @@ fun SettingsScreen(vm: OnyxViewModel) {
     val sources by vm.sources.collectAsStateWithLifecycle()
     val status by vm.sourceStatus.collectAsStateWithLifecycle()
     val parental by vm.parental.collectAsStateWithLifecycle()
+    // Les réglages du contrôle parental sont eux-mêmes protégés par le PIN (sinon n'importe qui
+    // avec la télécommande pouvait le désactiver).
+    var parentalUnlocked by remember { mutableStateOf(false) }
+    var askPin by remember { mutableStateOf(false) }
     val state by vm.state.collectAsStateWithLifecycle()
     val allGroups = remember(state.channels, state.vod) {
         (state.groups + state.vod.mapNotNull { it.category }).distinct()
     }
 
+    androidx.compose.foundation.layout.Box(Modifier.fillMaxSize()) {
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(horizontal = 36.dp),
         contentPadding = PaddingValues(vertical = 28.dp),
@@ -68,7 +73,7 @@ fun SettingsScreen(vm: OnyxViewModel) {
                 val ok = msg.startsWith("Connect") || msg.startsWith("Liste ajoutée")
                 Text(
                     msg,
-                    color = if (ok) OnyxLive else Md3.colorScheme.error,
+                    color = if (ok) OnyxCyan else OnyxLive,
                     style = MaterialTheme.typography.titleMedium,
                     modifier = Modifier
                         .fillMaxWidth()
@@ -112,8 +117,17 @@ fun SettingsScreen(vm: OnyxViewModel) {
         item { AppCard(vm) }
 
         // ---- Contrôle parental ----
-        item { ParentalCard(vm, parental.enabled, parental.lockAtStart) }
-        if (parental.enabled) {
+        if (parental.enabled && !parentalUnlocked) {
+            item {
+                Card(onClick = { askPin = true }, modifier = Modifier.fillMaxWidth()) {
+                    Column(Modifier.fillMaxWidth().padding(16.dp)) {
+                        Text("🔒 Contrôle parental actif", style = MaterialTheme.typography.titleLarge)
+                        Text("Appuyez sur OK et entrez le PIN pour modifier le code, les catégories verrouillées ou le verrouillage au démarrage.", color = OnyxMuted, style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
+            }
+        } else item { ParentalCard(vm, parental.enabled, parental.lockAtStart) }
+        if (parental.enabled && parentalUnlocked) {
             item {
                 Text(
                     if (allGroups.isEmpty()) "Ajoutez une source pour choisir les catégories à verrouiller."
@@ -129,12 +143,29 @@ fun SettingsScreen(vm: OnyxViewModel) {
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Text(g, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(end = 12.dp))
+                        Text(g, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false).padding(end = 12.dp))
                         Text(if (locked) "🔒 Verrouillée" else "🔓 Libre", color = if (locked) OnyxLive else OnyxCyan, style = MaterialTheme.typography.labelLarge)
                     }
                 }
             }
         }
+    }
+
+    if (askPin) {
+        androidx.compose.foundation.layout.Box(
+            Modifier
+                .fillMaxSize()
+                .androidx.compose.ui.focus.focusProperties { exit = { androidx.compose.ui.focus.FocusRequester.Cancel } }
+                .androidx.compose.foundation.focusGroup()
+        ) {
+            ca.onyxtv.player.ui.components.PinDialog(
+                title = "Contrôle parental",
+                subtitle = "Entrez le PIN pour modifier les réglages.",
+                onSubmit = { pin -> val ok = vm.unlockApp(pin); if (ok) { parentalUnlocked = true; askPin = false }; ok },
+                onCancel = { askPin = false },
+            )
+        }
+    }
     }
 }
 
@@ -153,7 +184,7 @@ private fun SourceRow(source: PlaylistSource, onRemove: () -> Unit) {
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Column(Modifier.padding(end = 12.dp)) {
+            Column(Modifier.weight(1f, fill = false).padding(end = 12.dp)) {
                 Text(source.label, style = MaterialTheme.typography.titleMedium)
                 Text(
                     "$type · $detail",
@@ -195,6 +226,7 @@ private fun Field(
     label: String,
     value: String,
     keyboard: KeyboardType = KeyboardType.Text,
+    password: Boolean = false,
     onValue: (String) -> Unit,
 ) {
     OutlinedTextField(
@@ -202,6 +234,7 @@ private fun Field(
         onValueChange = onValue,
         label = { androidx.compose.material3.Text(label) },
         singleLine = true,
+        visualTransformation = if (password) androidx.compose.ui.text.input.PasswordVisualTransformation() else androidx.compose.ui.text.input.VisualTransformation.None,
         // Sans autocorrection (clavier « brut » avec chiffres) et SANS ouverture automatique du
         // clavier au simple passage du focus : il s'ouvre quand on appuie sur OK dans le champ.
         keyboardOptions = KeyboardOptions(keyboardType = keyboard, autoCorrect = false, showKeyboardOnFocus = false),
@@ -268,7 +301,7 @@ private fun ParentalCard(vm: OnyxViewModel, enabled: Boolean, lockAtStart: Boole
             color = OnyxMuted,
             style = MaterialTheme.typography.bodyMedium,
         )
-        Field("Nouveau code PIN (4 chiffres)", pin, KeyboardType.NumberPassword) { v -> if (v.length <= 4 && v.all { it.isDigit() }) pin = v }
+        Field("Nouveau code PIN (4 chiffres)", pin, KeyboardType.NumberPassword, password = true) { v -> if (v.length <= 4 && v.all { it.isDigit() }) pin = v }
         Spacer(Modifier.height(8.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Button(onClick = { if (pin.length == 4) { vm.setPin(pin); pin = "" } }) {
@@ -404,7 +437,8 @@ private fun AppCard(vm: OnyxViewModel) {
         Button(onClick = { vm.setDiagnostics(!prefsDiag.diagnostics) }, modifier = Modifier.padding(top = 8.dp)) {
             Text("Mode diagnostic (cadre touches/focus à l'écran) : ${if (prefsDiag.diagnostics) "Activé" else "Désactivé"}")
         }
-        vm.lastCrash?.let { crash ->
+        val lastCrash by vm.lastCrash.collectAsStateWithLifecycle()
+        lastCrash?.let { crash ->
             Text("⚠ Dernier plantage enregistré :", color = OnyxLive, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 12.dp))
             Text(crash.lines().take(8).joinToString("\n"), color = OnyxMuted, style = MaterialTheme.typography.bodyMedium, maxLines = 8, overflow = TextOverflow.Ellipsis)
             Button(onClick = { vm.clearCrash() }, modifier = Modifier.padding(top = 6.dp)) { Text("Effacer le journal") }

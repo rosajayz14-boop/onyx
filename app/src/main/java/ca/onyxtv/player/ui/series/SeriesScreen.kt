@@ -234,7 +234,7 @@ private fun SeriesContent(
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(bottom = 10.dp)) {
                     items(seasons, key = { it }) { s ->
                         Button(onClick = { season = s }) {
-                            Text("Saison $s", color = if (s == season) OnyxCyan else MaterialTheme.colorScheme.onSurface)
+                            Text(if (s == season) "● Saison $s" else "Saison $s")
                         }
                     }
                 }

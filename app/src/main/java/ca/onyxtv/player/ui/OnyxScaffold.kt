@@ -147,10 +147,14 @@ fun OnyxRoot(vm: OnyxViewModel = viewModel()) {
     val recents by vm.recents.collectAsStateWithLifecycle()
     val state by vm.state.collectAsStateWithLifecycle()
     var autoResumed by remember { mutableStateOf(false) }
-    LaunchedEffect(prefs.resumeOnStart, recents) {
-        if (!autoResumed && prefs.resumeOnStart && recents.isNotEmpty()) {
+    val unlockedGroups by vm.unlockedGroups.collectAsStateWithLifecycle()
+    LaunchedEffect(prefs.resumeOnStart, recents, state.hasContent) {
+        // Attendre le catalogue (URL fraîche) et ignorer un contenu d'une catégorie verrouillée.
+        if (!autoResumed && prefs.resumeOnStart && recents.isNotEmpty() && state.hasContent) {
             autoResumed = true
-            playing = vm.freshTarget(recents.first())
+            val hidden = ca.onyxtv.player.viewmodel.hiddenGroups(parental, unlockedGroups)
+            val blocked = ca.onyxtv.player.viewmodel.hiddenIds(state.channels, state.vod, hidden)
+            recents.firstOrNull { it.id !in blocked }?.let { playing = vm.freshTarget(it) }
         }
     }
 
@@ -209,6 +213,10 @@ fun OnyxRoot(vm: OnyxViewModel = viewModel()) {
 
     // Retour : depuis le contenu -> revenir au menu (évite de perdre le focus) ; depuis le menu
     // d'une autre page -> Accueil ; depuis l'Accueil -> laisser le système quitter l'app.
+    // Filet de sécurité : si l'élément d'origine du menu a disparu (liste re-triée), aucune
+    // touche n'atteint plus l'interception ci-dessus ; Retour doit quand même fermer le menu.
+    BackHandler(enabled = contextMenu != null) { contextMenu = null }
+
     BackHandler(enabled = !overlayOpen && (contentHasFocus || dest != Dest.HOME)) {
         when {
             contentHasFocus -> { runCatching { railItemFocus.requestFocus() }; focusNonce++ }
@@ -227,7 +235,11 @@ fun OnyxRoot(vm: OnyxViewModel = viewModel()) {
             // focus : à la fermeture, rien n'est perdu). ▲ ▼ choisir, OK valider, Retour annuler.
             .onPreviewKeyEvent { ev ->
                 val menu = contextMenu ?: return@onPreviewKeyEvent false
+                if (menu.actions.isEmpty()) { contextMenu = null; return@onPreviewKeyEvent true }
                 val isOk = ev.key == Key.DirectionCenter || ev.key == Key.Enter || ev.key == Key.NumPadEnter
+                val mine = isOk || ev.key == Key.DirectionUp || ev.key == Key.DirectionDown || ev.key == Key.DirectionLeft ||
+                    ev.key == Key.DirectionRight || ev.key == Key.Back || ev.key == Key.Escape
+                if (!mine) return@onPreviewKeyEvent false   // volume, etc. : pas à nous
                 when {
                     isOk && ev.type == KeyEventType.KeyDown -> {
                         if (ev.nativeKeyEvent.repeatCount == 0) menuOkArmed = true

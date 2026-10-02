@@ -97,7 +97,7 @@ data class PlayTarget(
  * repli quand le décodeur matériel du boîtier rend une image noire (HEVC 10 bits, Dolby Vision…).
  */
 @OptIn(UnstableApi::class)
-private fun buildPlayer(context: android.content.Context, preferSoftware: Boolean): ExoPlayer {
+internal fun buildPlayer(context: android.content.Context, preferSoftware: Boolean): ExoPlayer {
     // Les serveurs Xtream redirigent souvent http -> https : refusé par défaut (=> erreur de lecture).
     // L'UA « ExoPlayerLib » est bloqué par certains panneaux.
     val http = androidx.media3.datasource.DefaultHttpDataSource.Factory()
@@ -218,6 +218,11 @@ fun PlayerScreen(
     var readyAt by remember { mutableStateOf(0L) }
     var noPicture by remember { mutableStateOf(false) }
     var fallbackNote by remember { mutableStateOf<String?>(null) }
+    // OK long a ouvert le panneau : les répétitions et le relâchement de CE même appui ne doivent
+    // pas « cliquer » le premier bouton du panneau (remise du format d'image à « Ajusté »).
+    var okLatched by remember { mutableStateOf(false) }
+    // Direct sans extension renvoyant du HLS : un seul nouvel essai en forçant le type m3u8.
+    var hlsRetried by remember { mutableStateOf(false) }
     val scope = androidx.compose.runtime.rememberCoroutineScope()
 
     // Fenêtre « générique » (3 dernières minutes) pour la VOD : ▲ lance l'épisode suivant.
@@ -240,10 +245,14 @@ fun PlayerScreen(
         error = null
         buffering = true
         firstFrame = false; readyAt = 0L; noPicture = false
-        val startMs = if (reloadAtMs >= 0) reloadAtMs else target.startPositionMs
+        val isReload = reloadAtMs >= 0
+        val startMs = if (isReload) reloadAtMs else target.startPositionMs
         reloadAtMs = -1L
+        hlsRetried = false
         var item = MediaItem.fromUri(target.url)
-        if (!target.isLive) {
+        // Sondage une seule fois par cible (pas au rechargement décodeur/réessai : certains
+        // panneaux limitent à 1 connexion et compteraient le sondage).
+        if (!target.isLive && !isReload) {
             // VOD : on regarde d'abord ce que le serveur renvoie VRAIMENT (redirection, HLS, page
             // HTML, 403…). Sinon ExoPlayer joue n'importe quoi en silence (écran noir, « film » de
             // quelques minutes = vidéo d'erreur du panneau) ou échoue avec un code obscur.
@@ -258,7 +267,9 @@ fun PlayerScreen(
                     else -> null
                 }
                 if (blocking != null) { buffering = false; error = blocking; return }
-                item = MediaItem.Builder().setUri(p.finalUrl)
+                // On garde l'URL D'ORIGINE (une URL finale de redirection est parfois à jeton unique) ;
+                // seul le type HLS est forcé quand le serveur renvoie une playlist.
+                item = MediaItem.Builder().setUri(target.url)
                     .apply { if (p.kind == StreamProbe.Kind.HLS) setMimeType(MimeTypes.APPLICATION_M3U8) }
                     .build()
             }
@@ -320,6 +331,12 @@ fun PlayerScreen(
         }
     }
 
+    /** Pause ↔ lecture, y compris pendant la mise en mémoire tampon (isPlaying y est faux). */
+    fun togglePlay() {
+        if (exo.playWhenReady) exo.pause() else exo.play()
+        runCatching { playerView?.showController() }
+    }
+
     fun seekBy(deltaMs: Long) {
         if (currentTarget.isLive || !exo.isCurrentMediaItemSeekable) return
         val dur = exo.duration.takeIf { it != C.TIME_UNSET } ?: return
@@ -363,12 +380,17 @@ fun PlayerScreen(
             // Direct : un fournisseur coupe souvent la connexion ; on se reconnecte (jusqu'à 5 fois)
             // au lieu de figer l'image ou d'afficher une erreur.
             fun reconnectLive(): Boolean {
-                if (liveRetries >= 5) return false
+                if (liveRetries >= 5) {
+                    buffering = false
+                    error = "Le serveur a coupé le flux et la reconnexion a échoué 5 fois."
+                    return false
+                }
                 liveRetries++
                 buffering = true
                 scope.launch {
                     delay(1_000L * liveRetries)
-                    runCatching { exo.seekToDefaultPosition(); exo.prepare(); exo.play() }
+                    // prepare() est sans effet si le lecteur n'est pas en IDLE (ex. après STATE_ENDED) : stop() d'abord.
+                    runCatching { exo.stop(); exo.seekToDefaultPosition(); exo.prepare(); exo.play() }
                 }
                 return true
             }
@@ -377,11 +399,14 @@ fun PlayerScreen(
                 buffering = playbackState == Player.STATE_BUFFERING
                 if (playbackState == Player.STATE_READY && readyAt == 0L) readyAt = System.currentTimeMillis()
                 if (playbackState == Player.STATE_ENDED) {
-                    if (currentTarget.isLive) reconnectLive() else ended = true
+                    if (currentTarget.isLive) reconnectLive() else { ended = true; panelOpen = false }
                 }
+                runCatching { playerView?.keepScreenOn = exo.playWhenReady && !ended && error == null }
             }
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 if (isPlaying) { error = null; liveRetries = 0 }
+                // Pas de veille pendant la lecture ; en pause/erreur, l'écran peut s'éteindre normalement.
+                runCatching { playerView?.keepScreenOn = exo.playWhenReady && !ended && error == null }
             }
             override fun onTracksChanged(t: Tracks) { tracks = t; videoFmt = exo.videoFormat; audioFmt = exo.audioFormat }
             override fun onPlayerError(e: PlaybackException) {
@@ -390,9 +415,23 @@ fun PlayerScreen(
                     runCatching { exo.seekToDefaultPosition(); exo.prepare() }
                     return
                 }
-                // Direct : erreur réseau transitoire -> reconnexion silencieuse.
-                if (currentTarget.isLive && e.errorCode in 2000..2999 && reconnectLive()) return
+                // Direct sans extension qui renvoie une playlist HLS : on force le type m3u8 (une fois).
+                if (currentTarget.isLive && !hlsRetried && e.errorCode == PlaybackException.ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED) {
+                    hlsRetried = true
+                    runCatching {
+                        exo.setMediaItem(MediaItem.Builder().setUri(currentTarget.url).setMimeType(MimeTypes.APPLICATION_M3U8).build())
+                        exo.prepare(); exo.play()
+                    }
+                    return
+                }
+                // Direct : erreur RÉSEAU transitoire -> reconnexion silencieuse. Un 403/404 (compte
+                // limité, chaîne retirée) est définitif : on l'affiche tout de suite.
+                val transient = e.errorCode == PlaybackException.ERROR_CODE_IO_UNSPECIFIED ||
+                    e.errorCode == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED ||
+                    e.errorCode == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT
+                if (currentTarget.isLive && transient && reconnectLive()) return
                 buffering = false
+                panelOpen = false
                 error = when (e.errorCode) {
                     PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED,
                     PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT ->
@@ -494,9 +533,13 @@ fun PlayerScreen(
             // Chien de garde « image noire » : prêt depuis 7 s, lecture lancée, aucune image rendue.
             // Repli automatique UNE fois par étape : rendu TextureView, puis décodeur logiciel ;
             // ensuite on explique clairement (codec, décodeur) au lieu de laisser l'écran noir.
-            if (!firstFrame && error == null && readyAt > 0 && exo.playWhenReady &&
+            val vGroups = tracks.groups.filter { it.type == C.TRACK_TYPE_VIDEO }
+            val decodable = vGroups.any { g -> (0 until g.length).any { g.isTrackSupported(it) } }
+            // Pas de piste vidéo (radio, .mp3) : rien à surveiller — surtout pas de reconstruction du lecteur.
+            if (vGroups.isNotEmpty() && !firstFrame && error == null && readyAt > 0 && exo.playWhenReady &&
                 exo.playbackState == Player.STATE_READY && System.currentTimeMillis() - readyAt > 7_000) {
                 when {
+                    !decodable -> { noPicture = true; fallbackNote = null }
                     !textureView -> {
                         textureView = true; readyAt = System.currentTimeMillis()
                         fallbackNote = "Aucune image : passage au rendu TextureView…"
@@ -531,7 +574,10 @@ fun PlayerScreen(
     }
 
     LaunchedEffect(Unit) { repeat(10) { runCatching { focus.requestFocus() }; kotlinx.coroutines.delay(100) } }
-    LaunchedEffect(panelOpen) { if (panelOpen) runCatching { panelFocus.requestFocus() } else runCatching { focus.requestFocus() } }
+    LaunchedEffect(panelOpen) {
+        if (panelOpen) runCatching { panelFocus.requestFocus() }
+        else runCatching { if (error != null || ended) overlayFocus.requestFocus() else focus.requestFocus() }
+    }
     LaunchedEffect(error, ended) {
         delay(80)
         if (error != null || ended) runCatching { overlayFocus.requestFocus() } else runCatching { focus.requestFocus() }
@@ -555,16 +601,28 @@ fun PlayerScreen(
                     return@onPreviewKeyEvent true
                 }
                 val isOk = ev.key == Key.DirectionCenter || ev.key == Key.Enter || ev.key == Key.NumPadEnter
+                // Suite de l'appui long qui a ouvert le panneau : avalée jusqu'au relâchement.
+                if (isOk && okLatched) {
+                    if (ev.type == KeyEventType.KeyUp) okLatched = false
+                    return@onPreviewKeyEvent true
+                }
+                // Touches média de la télécommande (⏯ ⏪ ⏩ ⏹) : toujours actives.
+                if (ev.type == KeyEventType.KeyDown) {
+                    when (ev.key) {
+                        Key.MediaPlayPause, Key.MediaPlay, Key.MediaPause -> { if (error == null && !ended) togglePlay(); return@onPreviewKeyEvent true }
+                        Key.MediaRewind -> { seekBy(-seekBackSeconds * 1000L); return@onPreviewKeyEvent true }
+                        Key.MediaFastForward -> { seekBy(seekForwardSeconds * 1000L); return@onPreviewKeyEvent true }
+                        Key.MediaStop -> { onExit(); return@onPreviewKeyEvent true }
+                        else -> Unit
+                    }
+                }
                 // Écran d'erreur ou de fin : les boutons (Réessayer / Lire maintenant / Retour) doivent
                 // recevoir OK et les flèches ; on laisse donc tout passer aux enfants.
                 if (error != null || ended) return@onPreviewKeyEvent false
                 if (isOk && !panelOpen) {
                     when {
-                        ev.type == KeyEventType.KeyDown && ev.nativeKeyEvent.isLongPress -> panelOpen = true
-                        ev.type == KeyEventType.KeyUp && !ev.nativeKeyEvent.isCanceled -> {
-                            if (exo.isPlaying) exo.pause() else exo.play()
-                            runCatching { playerView?.showController() }
-                        }
+                        ev.type == KeyEventType.KeyDown && ev.nativeKeyEvent.isLongPress -> { panelOpen = true; okLatched = true }
+                        ev.type == KeyEventType.KeyUp && !ev.nativeKeyEvent.isCanceled -> togglePlay()
                     }
                     return@onPreviewKeyEvent true
                 }
@@ -829,7 +887,7 @@ fun PlayerScreen(
                 Text(msg, style = MaterialTheme.typography.bodyLarge, color = OnyxMuted)
                 Text(streamInfo(), style = MaterialTheme.typography.bodySmall, color = OnyxMuted)
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Button(onClick = { scope.launch { load() } }, modifier = Modifier.focusRequester(overlayFocus)) { Text("Réessayer") }
+                    Button(onClick = { reloadAtMs = exo.currentPosition.coerceAtLeast(0L); scope.launch { load() } }, modifier = Modifier.focusRequester(overlayFocus)) { Text("Réessayer") }
                     if (target.isLive && zap != null) Button(onClick = { doZap(+1) }) { Text("Chaîne suivante") }
                     Button(onClick = onExit) { Text("Retour") }
                 }

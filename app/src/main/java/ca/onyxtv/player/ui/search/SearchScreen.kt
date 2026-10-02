@@ -105,7 +105,7 @@ fun SearchScreen(
                 modifier = Modifier.fillMaxSize().padding(top = 8.dp),
                 horizontalArrangement = Arrangement.spacedBy(16.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp),
-                contentPadding = PaddingValues(bottom = 20.dp),
+                contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 20.dp),
             ) {
                 items(results, key = { it.seed }) { hit ->
                     MediaCard(

@@ -30,17 +30,19 @@ class PlaylistStore(private val context: Context) {
         context.dataStore.edit { it[key] = raw }
     }
 
-    suspend fun add(source: PlaylistSource) {
-        val current = sources.first()
-        save(current.filterNot { it.id == source.id } + source)
+    // Lecture-modification-écriture DANS la transaction (deux ajouts rapprochés ne s'écrasent plus).
+    private suspend fun modify(transform: (List<PlaylistSource>) -> List<PlaylistSource>) {
+        context.dataStore.edit { p ->
+            val current = runCatching { p[key]?.let { json.decodeFromString(serializer, it) } }.getOrNull().orEmpty()
+            p[key] = json.encodeToString(serializer, transform(current))
+        }
     }
+
+    suspend fun add(source: PlaylistSource) = modify { cur -> cur.filterNot { it.id == source.id } + source }
 
     /** Modifie une source en place (ex. format des flux live). */
-    suspend fun update(id: String, transform: (PlaylistSource) -> PlaylistSource) {
-        save(sources.first().map { if (it.id == id) transform(it) else it })
-    }
+    suspend fun update(id: String, transform: (PlaylistSource) -> PlaylistSource) =
+        modify { cur -> cur.map { if (it.id == id) transform(it) else it } }
 
-    suspend fun remove(id: String) {
-        save(sources.first().filterNot { it.id == id })
-    }
+    suspend fun remove(id: String) = modify { cur -> cur.filterNot { it.id == id } }
 }

@@ -66,6 +66,9 @@ private const val SLOTS = 4
  */
 @Composable
 fun MosaicScreen(vm: OnyxViewModel, onPlay: (PlayTarget) -> Unit) {
+    // Pas d'écran de veille sur les 4 tuiles.
+    val rootView = androidx.compose.ui.platform.LocalView.current
+    DisposableEffect(rootView) { rootView.keepScreenOn = true; onDispose { rootView.keepScreenOn = false } }
     val state by vm.state.collectAsStateWithLifecycle()
     val favorites by vm.favorites.collectAsStateWithLifecycle()
     val parental by vm.parental.collectAsStateWithLifecycle()
@@ -167,26 +170,52 @@ private fun MosaicTile(
             } else {
                 val context = LocalContext.current
                 var failed by remember(channel.url) { mutableStateOf(false) }
+                // Même construction que le lecteur principal (UA accepté, redirections http->https,
+                // repli décodeur) : sinon des tuiles échouaient là où le lecteur fonctionnait.
                 val exo = remember(channel.url) {
-                    ExoPlayer.Builder(context).build().apply {
+                    ca.onyxtv.player.player.buildPlayer(context, false).apply {
                         setMediaItem(MediaItem.fromUri(channel.url))
                         prepare()
                         playWhenReady = true
                         volume = 0f
                     }
                 }
-                DisposableEffect(exo) {
+                val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+                DisposableEffect(exo, lifecycleOwner) {
                     val listener = object : Player.Listener {
                         override fun onPlayerError(error: PlaybackException) { failed = true }
                         override fun onIsPlayingChanged(isPlaying: Boolean) { if (isPlaying) failed = false }
                     }
+                    // Accueil / veille : on coupe les 4 flux (décodeurs + connexions), on les reprend au retour.
+                    val obs = androidx.lifecycle.LifecycleEventObserver { _, e ->
+                        when (e) {
+                            androidx.lifecycle.Lifecycle.Event.ON_STOP -> runCatching { exo.stop() }
+                            androidx.lifecycle.Lifecycle.Event.ON_START -> runCatching { exo.prepare(); exo.play() }
+                            else -> Unit
+                        }
+                    }
                     exo.addListener(listener)
+                    lifecycleOwner.lifecycle.addObserver(obs)
                     onDispose {
+                        lifecycleOwner.lifecycle.removeObserver(obs)
                         exo.removeListener(listener)
                         exo.release()
                     }
                 }
-                LaunchedEffect(exo, active) { exo.volume = if (active) 1f else 0f }
+                // Tuile inactive : piste audio DÉSACTIVÉE (plus de décodage inutile), pas seulement muette.
+                LaunchedEffect(exo, active) {
+                    exo.volume = if (active) 1f else 0f
+                    exo.trackSelectionParameters = exo.trackSelectionParameters.buildUpon()
+                        .setTrackTypeDisabled(androidx.media3.common.C.TRACK_TYPE_AUDIO, !active).build()
+                }
+                // Flux en échec : un nouvel essai toutes les 15 s (le fournisseur coupe souvent brièvement).
+                LaunchedEffect(failed) {
+                    if (failed) {
+                        kotlinx.coroutines.delay(15_000)
+                        runCatching { exo.stop(); exo.prepare(); exo.play() }
+                        failed = false
+                    }
+                }
 
                 if (failed) {
                     Thumbnail(channel.logoUrl, channel.name.take(2).uppercase(), channel.id, Modifier.fillMaxSize())

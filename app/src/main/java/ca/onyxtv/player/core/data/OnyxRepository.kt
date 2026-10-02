@@ -45,13 +45,13 @@ class OnyxRepository(
                 when (source) {
                     is PlaylistSource.M3u -> {
                         onProgress("Liste « ${source.label} »…")
-                        runCatching { M3uParser.parse(Http.get(source.url)) }
+                        runCatching { M3uParser.parse(Http.get(source.url), source.id) }
                             .fold(
                                 onSuccess = { ch ->
                                     Triple(ch, emptyList<VodItem>(), SourceReport(source.id, source.label, "M3U", channels = ch.size, durationMs = System.currentTimeMillis() - t0))
                                 },
                                 onFailure = { e ->
-                                    Triple(emptyList<Channel>(), emptyList<VodItem>(), SourceReport(source.id, source.label, "M3U", error = Http.describe(e), durationMs = System.currentTimeMillis() - t0))
+                                    Triple(emptyList<Channel>(), emptyList<VodItem>(), SourceReport(source.id, source.label, "M3U", error = Http.describe(e), durationMs = System.currentTimeMillis() - t0, liveOk = false))
                                 },
                             )
                     }
@@ -75,6 +75,7 @@ class OnyxRepository(
                                 channels = ch.size, movies = mv.size, series = sr.size,
                                 error = errors.takeIf { it.isNotEmpty() }?.joinToString(" · "),
                                 durationMs = System.currentTimeMillis() - t0,
+                                liveOk = live.await().isSuccess, vodOk = movies.await().isSuccess, seriesOk = series.await().isSuccess,
                             ),
                         )
                     }
@@ -109,6 +110,7 @@ class OnyxRepository(
         var t = java.text.Normalizer.normalize(raw.lowercase(), java.text.Normalizer.Form.NFD)
             .replace(Regex("\\p{M}"), "")
         t = t.replace(Regex("\\.[a-z]{2,3}$"), "")
+        t = t.replace(Regex("^\\s*[a-z]{2,3}\\s*[:|\\-]\\s*"), "")            // préfixe pays « CA: », « FR | »
         t = t.replace(Regex("\\b(hd|fhd|uhd|4k|sd|hevc|h265|raw|vip)\\b"), " ")
         return t.replace(Regex("[^a-z0-9]"), "")
     }
@@ -132,7 +134,12 @@ class OnyxRepository(
         if (byName.isBlank()) return emptyList()
         idx[byName]?.takeIf { it.isNotEmpty() }?.let { return it }
         if (byName.length >= 4) {
-            idx.entries.firstOrNull { (k, v) -> v.isNotEmpty() && (k == byName || (k.length >= 4 && (k.contains(byName) || byName.contains(k)))) }
+            // Préfixe strict : « espn » ne doit PAS prendre « espn2 », « tsn1 » ne doit pas prendre « tsn10 ».
+            fun prefixOk(longer: String, shorter: String) =
+                longer.length > shorter.length && longer.startsWith(shorter) && !longer[shorter.length].isDigit()
+            idx.entries
+                .filter { (k, v) -> v.isNotEmpty() && k.length >= 4 && (prefixOk(k, byName) || prefixOk(byName, k)) }
+                .minByOrNull { (k, _) -> kotlin.math.abs(k.length - byName.length) }
                 ?.let { return it.value }
         }
         return emptyList()
@@ -277,6 +284,10 @@ class OnyxRepository(
                         epgFile(url)?.writeText(epgJson.encodeToString(epgListSer, parsed))
                     }
                 }
+            } else {
+                // Cache NÉGATIF (10 min) : sans lui, chaque chaîne affichée relançait le
+                // téléchargement complet du guide (dizaines de Mo) après un échec.
+                synchronized(xmltvByUrl) { xmltvByUrl[url] = Cached(now - XMLTV_TTL_MS + 10 * 60_000L, parsed) }
             }
             parsed
         }

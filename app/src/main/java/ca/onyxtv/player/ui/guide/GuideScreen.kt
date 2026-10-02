@@ -213,7 +213,7 @@ fun GuideScreen(vm: OnyxViewModel, onPlay: (PlayTarget) -> Unit) {
 @Composable
 private fun Chip(label: String, selected: Boolean, onClick: () -> Unit) {
     Button(onClick = onClick) {
-        Text(label, color = if (selected) OnyxCyan else MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(if (selected) "● $label" else label, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 

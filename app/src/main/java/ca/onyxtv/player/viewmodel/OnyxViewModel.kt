@@ -149,24 +149,34 @@ class OnyxViewModel(app: Application) : AndroidViewModel(app) {
     val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
     fun setSearchQuery(q: String) { _searchQuery.value = q }
 
+    // `by lazy` : `parental` est déclaré plus bas (ordre d'initialisation des propriétés).
+    // Le filtre parental s'applique AVANT la troncature à 60 : sinon 60 résultats verrouillés
+    // masquaient des résultats visibles.
     @OptIn(FlowPreview::class)
-    val searchResults: StateFlow<Pair<List<Channel>, List<VodItem>>> = combine(
-        _searchQuery.debounce(250),
-        _state.map { it.channels to it.vod }.distinctUntilChanged(),
-    ) { q, (channels, vod) ->
-        val needle = q.trim()
-        if (needle.length < 2) emptyList<Channel>() to emptyList()
-        else channels.asSequence().filter { it.name.contains(needle, ignoreCase = true) }.take(60).toList() to
-            vod.asSequence().filter { it.name.contains(needle, ignoreCase = true) }.take(60).toList()
-    }.flowOn(Dispatchers.Default)
-        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList<Channel>() to emptyList())
+    val searchResults: StateFlow<Pair<List<Channel>, List<VodItem>>> by lazy {
+        combine(
+            _searchQuery.debounce(250),
+            _state.map { it.channels to it.vod }.distinctUntilChanged(),
+            parental,
+            _unlockedGroups,
+        ) { q, (channels, vod), p, u ->
+            val needle = q.trim()
+            val hidden = hiddenGroups(p, u)
+            if (needle.length < 2) emptyList<Channel>() to emptyList()
+            else channels.asSequence().filter { it.groupTitle !in hidden && it.name.contains(needle, ignoreCase = true) }.take(60).toList() to
+                vod.asSequence().filter { it.category !in hidden && it.name.contains(needle, ignoreCase = true) }.take(60).toList()
+        }.flowOn(Dispatchers.Default)
+            .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList<Channel>() to emptyList())
+    }
 
     // ---- Journal de plantage ----
     private val crashFile = File(app.filesDir, ca.onyxtv.player.OnyxApp.CRASH_FILE)
-    var lastCrash: String? = runCatching { crashFile.takeIf { it.exists() }?.readText() }.getOrNull()
+    private val _lastCrash = MutableStateFlow(runCatching { crashFile.takeIf { it.exists() }?.readText() }.getOrNull())
+    /** Dernier plantage enregistré (observable : « Effacer le journal » met l'écran à jour). */
+    val lastCrash: StateFlow<String?> = _lastCrash.asStateFlow()
         private set
 
-    fun clearCrash() { runCatching { crashFile.delete() }; lastCrash = null }
+    fun clearCrash() { runCatching { crashFile.delete() }; _lastCrash.value = null }
 
     // ---- Préférences ----
     val prefs: StateFlow<AppPrefs> =
@@ -228,6 +238,10 @@ class OnyxViewModel(app: Application) : AndroidViewModel(app) {
         if (!UpdateChecker.canInstall(ctx)) {
             UpdateChecker.openInstallPermission(ctx)
             _update.update { it.copy(error = "Autorisez ONYX TV à installer des applications, puis appuyez de nouveau sur « Installer ».") }
+            return
+        }
+        if (UpdateChecker.sameSigner(ctx, file) == false) {
+            _update.update { it.copy(error = "Cette mise à jour est signée avec une autre clé que l'app installée : Android la refusera. Désinstallez ONYX TV puis réinstallez-la depuis l'URL tv-latest (favoris et réglages seront perdus).") }
             return
         }
         runCatching { UpdateChecker.install(ctx, file) }
@@ -314,8 +328,12 @@ class OnyxViewModel(app: Application) : AndroidViewModel(app) {
      * Met à jour TOUT le catalogue (chaînes, films, séries) depuis les serveurs.
      * Les sources en échec conservent leurs données précédentes ; le bilan est dans [OnyxUiState.reports].
      */
+    private var refreshRequested = false
+
     fun refresh() {
-        if (_state.value.loading) return
+        // Déjà en cours (ex. rafraîchissement du démarrage) : on note la demande et on relance
+        // à la fin. Sinon « Ajouter un compte » pendant un chargement était perdu.
+        if (_state.value.loading) { refreshRequested = true; return }
         viewModelScope.launch {
             _state.update { it.copy(loading = true, error = null, progress = "Connexion aux sources…") }
             runCatching { repo.loadCatalog { msg -> _state.update { it.copy(progress = msg) } } }
@@ -337,23 +355,30 @@ class OnyxViewModel(app: Application) : AndroidViewModel(app) {
                 .onFailure { e ->
                     _state.update { it.copy(loading = false, progress = null, error = Http.describe(e)) }
                 }
+            if (refreshRequested) { refreshRequested = false; refresh() }
         }
     }
 
     /** Une source totalement en échec garde ce qu'elle avait chargé la fois précédente. */
     private fun mergeWithPrevious(fresh: CatalogSnapshot, prev: OnyxUiState): CatalogSnapshot {
-        val failed = fresh.reports.filter { it.error != null && it.channels == 0 && it.movies == 0 && it.series == 0 }
-        if (failed.isEmpty()) return fresh
-        val keepPrefixes = failed.map { if (it.type == "Xtream") "xt:${it.sourceId}:" else "m3u:" }
-        fun keep(id: String) = keepPrefixes.any { id.startsWith(it) }
-        val keptChannels = prev.channels.filter { keep(it.id) }
-        val keptVod = prev.vod.filter { keep(it.id) }
+        // Fusion PAR TYPE : si seules les séries d'un compte ont échoué, on garde les séries
+        // précédentes de ce compte et on prend les chaînes/films frais. Jamais de doublon d'id.
+        val partial = fresh.reports.filter { !it.liveOk || !it.vodOk || !it.seriesOk }
+        if (partial.isEmpty()) return fresh
+        fun prefix(r: SourceReport, kind: String) = if (r.type == "Xtream") "xt:${r.sourceId}:$kind:" else "m3u:${r.sourceId}:"
+        val keepChannelPrefixes = partial.filter { !it.liveOk }.map { prefix(it, "live") }
+        val keepVodPrefixes = partial.filter { it.type == "Xtream" && !it.vodOk }.map { prefix(it, "vod") } +
+            partial.filter { it.type == "Xtream" && !it.seriesOk }.map { prefix(it, "series") }
+        val freshChannelIds = fresh.channels.mapTo(HashSet()) { it.id }
+        val freshVodIds = fresh.vod.mapTo(HashSet()) { it.id }
+        val keptChannels = prev.channels.filter { c -> c.id !in freshChannelIds && keepChannelPrefixes.any { c.id.startsWith(it) } }
+        val keptVod = prev.vod.filter { v -> v.id !in freshVodIds && keepVodPrefixes.any { v.id.startsWith(it) } }
         val reports = fresh.reports.map { r ->
-            if (r in failed) r.copy(
-                channels = keptChannels.count { it.id.startsWith(if (r.type == "Xtream") "xt:${r.sourceId}:" else "m3u:") },
-                movies = keptVod.count { it.id.contains(":vod:") && it.id.startsWith("xt:${r.sourceId}:") },
-                series = keptVod.count { it.id.contains(":series:") && it.id.startsWith("xt:${r.sourceId}:") },
-                error = r.error + " (données précédentes conservées)",
+            if (r in partial) r.copy(
+                channels = if (r.liveOk) r.channels else keptChannels.count { it.id.startsWith(prefix(r, "live")) },
+                movies = if (r.vodOk) r.movies else keptVod.count { it.id.startsWith(prefix(r, "vod")) },
+                series = if (r.seriesOk) r.series else keptVod.count { it.id.startsWith(prefix(r, "series")) },
+                error = (r.error ?: "erreur") + " (données précédentes conservées)",
             ) else r
         }
         return fresh.copy(channels = fresh.channels + keptChannels, vod = fresh.vod + keptVod, reports = reports)
@@ -531,6 +556,15 @@ class OnyxViewModel(app: Application) : AndroidViewModel(app) {
 }
 
 /** Catégories à masquer tant qu'elles n'ont pas été déverrouillées par le PIN. */
+/** Identifiants (chaînes + VOD) appartenant aux groupes masqués : pour filtrer récents, reprise, favoris. */
+fun hiddenIds(channels: List<Channel>, vod: List<VodItem>, hidden: Set<String>): Set<String> {
+    if (hidden.isEmpty()) return emptySet()
+    val out = HashSet<String>()
+    channels.forEach { if (it.groupTitle in hidden) out.add(it.id) }
+    vod.forEach { if (it.category in hidden) out.add(it.id) }
+    return out
+}
+
 fun hiddenGroups(parental: ParentalSettings, unlocked: Set<String>): Set<String> =
     if (!parental.enabled) emptySet() else parental.lockedGroups - unlocked
 

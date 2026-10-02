@@ -62,6 +62,19 @@ fun TrailerScreen(videoId: String, title: String, onBack: () -> Unit) {
             }
         }
     }
+    // Accueil / veille : sans cela, le son YouTube continue en arrière-plan.
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val obs = androidx.lifecycle.LifecycleEventObserver { _, e ->
+            when (e) {
+                androidx.lifecycle.Lifecycle.Event.ON_STOP -> runCatching { webView?.onPause(); webView?.pauseTimers() }
+                androidx.lifecycle.Lifecycle.Event.ON_START -> runCatching { webView?.onResume(); webView?.resumeTimers() }
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(obs)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(obs) }
+    }
 
     // API officielle « IFrame Player » de YouTube, servie avec l'origine https://www.youtube.com.
     // C'est la méthode fiable : charger directement .../embed/ID donne l'erreur 153 (référent

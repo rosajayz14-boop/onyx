@@ -1,7 +1,31 @@
 package ca.onyxtv.player.core.xtream
 
+import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.descriptors.PrimitiveKind
+import kotlinx.serialization.descriptors.PrimitiveSerialDescriptor
+import kotlinx.serialization.descriptors.SerialDescriptor
+import kotlinx.serialization.descriptors.nullable
+import kotlinx.serialization.encoding.Decoder
+import kotlinx.serialization.encoding.Encoder
+import kotlinx.serialization.json.JsonDecoder
+import kotlinx.serialization.json.JsonPrimitive
+
+/**
+ * Entier « tolérant » : les panneaux Xtream renvoient `num`/`tv_archive`… tantôt en nombre,
+ * tantôt en texte (« 12 », « » vide, « 1.0 »). Avec un Int strict, UN seul enregistrement
+ * bizarre faisait basculer tout le catalogue sur le décodage lent (arbre JSON de 50 Mo).
+ */
+object LenientInt : KSerializer<Int?> {
+    override val descriptor: SerialDescriptor = PrimitiveSerialDescriptor("LenientInt", PrimitiveKind.STRING).nullable
+    override fun deserialize(decoder: Decoder): Int? {
+        val el = (decoder as? JsonDecoder)?.decodeJsonElement() ?: return runCatching { decoder.decodeInt() }.getOrNull()
+        val c = (el as? JsonPrimitive)?.content?.trim() ?: return null
+        return c.toIntOrNull() ?: c.toDoubleOrNull()?.toInt()
+    }
+    override fun serialize(encoder: Encoder, value: Int?) { if (value == null) encoder.encodeNull() else encoder.encodeInt(value) }
+}
 
 /**
  * Modèles JSON des réponses Xtream Codes (player_api.php).
@@ -30,24 +54,24 @@ data class XtUserInfo(
 data class XtCategory(
     @SerialName("category_id") val categoryId: String = "",
     @SerialName("category_name") val categoryName: String = "",
-    @SerialName("parent_id") val parentId: Int = 0,
+    @Serializable(with = LenientInt::class) @SerialName("parent_id") val parentId: Int? = null,
 )
 
 @Serializable
 data class XtLiveStream(
-    @SerialName("num") val num: Int? = null,
+    @Serializable(with = LenientInt::class) @SerialName("num") val num: Int? = null,
     @SerialName("name") val name: String = "",
     @SerialName("stream_id") val streamId: Long = 0,
     @SerialName("stream_icon") val streamIcon: String? = null,
     @SerialName("epg_channel_id") val epgChannelId: String? = null,
     @SerialName("category_id") val categoryId: String? = null,
-    @SerialName("tv_archive") val tvArchive: Int? = null,
-    @SerialName("tv_archive_duration") val tvArchiveDuration: Int? = null,
+    @Serializable(with = LenientInt::class) @SerialName("tv_archive") val tvArchive: Int? = null,
+    @Serializable(with = LenientInt::class) @SerialName("tv_archive_duration") val tvArchiveDuration: Int? = null,
 )
 
 @Serializable
 data class XtVodStream(
-    @SerialName("num") val num: Int? = null,
+    @Serializable(with = LenientInt::class) @SerialName("num") val num: Int? = null,
     @SerialName("name") val name: String = "",
     @SerialName("stream_id") val streamId: Long = 0,
     @SerialName("stream_icon") val streamIcon: String? = null,
@@ -59,7 +83,7 @@ data class XtVodStream(
 
 @Serializable
 data class XtSeries(
-    @SerialName("num") val num: Int? = null,
+    @Serializable(with = LenientInt::class) @SerialName("num") val num: Int? = null,
     @SerialName("name") val name: String = "",
     @SerialName("series_id") val seriesId: Long = 0,
     @SerialName("cover") val cover: String? = null,

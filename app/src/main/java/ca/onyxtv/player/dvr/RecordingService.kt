@@ -25,6 +25,7 @@ import okhttp3.Request
 import java.io.File
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
+import kotlinx.coroutines.job
 
 /**
  * Service de premier plan qui capture un flux live vers un fichier .ts du dossier privé
@@ -36,11 +37,43 @@ class RecordingService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val jobs = ConcurrentHashMap<String, Job>()
     private lateinit var store: RecordingStore
+    // Un enregistrement de plusieurs heures doit survivre à la veille : verrou CPU + Wi-Fi.
+    private var wakeLock: android.os.PowerManager.WakeLock? = null
+    private var wifiLock: android.net.wifi.WifiManager.WifiLock? = null
 
     override fun onCreate() {
         super.onCreate()
         store = RecordingStore(applicationContext)
         createChannel()
+    }
+
+    private fun acquireLocks() {
+        runCatching {
+            if (wakeLock == null) {
+                val pm = getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
+                wakeLock = pm.newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK, "onyx:dvr").apply { setReferenceCounted(false); acquire() }
+            }
+            if (wifiLock == null) {
+                val wm = applicationContext.getSystemService(Context.WIFI_SERVICE) as android.net.wifi.WifiManager
+                @Suppress("DEPRECATION")
+                wifiLock = wm.createWifiLock(android.net.wifi.WifiManager.WIFI_MODE_FULL_HIGH_PERF, "onyx:dvr").apply { setReferenceCounted(false); acquire() }
+            }
+        }
+    }
+
+    private fun releaseLocks() {
+        runCatching { wakeLock?.takeIf { it.isHeld }?.release() }; wakeLock = null
+        runCatching { wifiLock?.takeIf { it.isHeld }?.release() }; wifiLock = null
+    }
+
+    /** Android 15 : budget de 6 h / 24 h pour un service dataSync ; au-delà le système nous prévient
+     *  et tue l'app si on ne s'arrête pas vite. On clôt proprement tous les enregistrements. */
+    override fun onTimeout(startId: Int, fgsType: Int) {
+        jobs.values.forEach { it.cancel() }
+        jobs.clear()
+        ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
+        releaseLocks()
+        stopSelf()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -49,7 +82,8 @@ class RecordingService : Service() {
                 val url = intent.getStringExtra(EXTRA_URL) ?: return stopIfIdle()
                 val title = intent.getStringExtra(EXTRA_TITLE) ?: "Enregistrement"
                 val channelId = intent.getStringExtra(EXTRA_CHANNEL_ID) ?: ""
-                val minutes = intent.getIntExtra(EXTRA_MINUTES, 60).coerceIn(1, 8 * 60)
+                // Plafond sous le budget Android 15 (6 h de service dataSync par 24 h).
+                val minutes = intent.getIntExtra(EXTRA_MINUTES, 60).coerceIn(1, 5 * 60 + 45)
                 startRecording(url, title, channelId, minutes)
             }
             ACTION_STOP -> {
@@ -73,6 +107,10 @@ class RecordingService : Service() {
             plannedMinutes = minutes,
         )
         goForeground("Enregistrement : $title")
+        acquireLocks()
+        // Une playlist HLS (.m3u8) copiée octet par octet donne un fichier texte inutilisable :
+        // pour un direct Xtream on enregistre toujours le flux MPEG-TS continu.
+        val streamUrl = if (url.contains("/live/")) url.replace(Regex("\\.m3u8(\\?.*)?$"), ".ts$1") else url
 
         val job = scope.launch {
             store.upsert(info)
@@ -81,8 +119,12 @@ class RecordingService : Service() {
             var error: String? = null
             var size = 0L
             try {
-                val request = Request.Builder().url(url).header("User-Agent", "ONYX-TV/0.1 (Android TV)").build()
-                Http.client.newCall(request).execute().use { resp ->
+                val request = Request.Builder().url(streamUrl).header("User-Agent", "ONYX-TV/1.0 (Android TV)").build()
+                // Client SANS délai global (Http.client coupait chaque enregistrement après 240 s) ;
+                // l'appel est annulé avec la coroutine (Stop immédiat, sans attendre le readTimeout).
+                val call = Http.stream.newCall(request)
+                coroutineContext.job.invokeOnCompletion { call.cancel() }
+                call.execute().use { resp ->
                     if (!resp.isSuccessful) throw IllegalStateException("HTTP ${resp.code}")
                     val body = resp.body ?: throw IllegalStateException("Réponse vide")
                     body.byteStream().use { input ->
@@ -131,6 +173,7 @@ class RecordingService : Service() {
     private fun stopIfIdle(): Int {
         if (jobs.isEmpty()) {
             ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
+            releaseLocks()
             stopSelf()
         } else {
             goForeground("${jobs.size} enregistrement(s) en cours")
@@ -161,6 +204,7 @@ class RecordingService : Service() {
 
     override fun onDestroy() {
         scope.cancel()
+        releaseLocks()
         super.onDestroy()
     }
 
@@ -189,7 +233,9 @@ class RecordingService : Service() {
 
         fun stop(context: Context, id: String) {
             val i = Intent(context, RecordingService::class.java).setAction(ACTION_STOP).putExtra(EXTRA_ID, id)
-            ContextCompat.startForegroundService(context, i)
+            // startService (pas startForegroundService) : si le service est déjà arrêté, un
+            // startForegroundService sans startForeground() ferait planter l'app (Android 8+).
+            runCatching { context.startService(i) }
         }
     }
 }

@@ -26,8 +26,9 @@ on:
 permissions:
   contents: write
 
+# Un seul build à la fois, toutes branches confondues : deux runs simultanés se disputaient tv-latest.
 concurrency:
-  group: build-apk-${{ github.ref }}
+  group: build-apk-publish
   cancel-in-progress: false
 
 jobs:
@@ -150,12 +151,21 @@ jobs:
           if-no-files-found: error
 
       # Release "roulante" tv-latest : URL fixe, toujours la dernière version (pour Downloader).
+      # Sans clé de release, l'APK est signé avec une clé debug DIFFÉRENTE à chaque run : la mise à
+      # jour dans l'app échouerait toujours. On refuse de publier plutôt que de casser les boîtiers.
+      - name: Refuse to publish an APK signed with a debug key
+        if: steps.signing.outputs.signed != 'release'
+        run: |
+          echo "::error::Secrets ONYX_KEYSTORE_BASE64 / ONYX_STORE_PW / ONYX_KEY_ALIAS / ONYX_KEY_PW absents : publication annulée (l'artefact de build reste disponible)."
+          exit 1
+
       - name: Publish rolling release (tv-latest)
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release delete tv-latest --yes --cleanup-tag 2>/dev/null || true
           gh release create tv-latest dist/onyx-tv.apk \
+            --target "$GITHUB_SHA" \
             --title "ONYX TV ${{ steps.ver.outputs.version_name }} · build ${{ github.run_number }}" \
             --notes "APK pour Android TV / Fire TV / Google TV — version ${{ steps.ver.outputs.version_name }}.
 
@@ -191,5 +201,5 @@ jobs:
               gh release upload "$TAG" "$APK" --clobber
             fi
           else
-            gh release create "$TAG" "$APK" --title "ONYX TV ${VN}" --notes "$NOTES"
+            gh release create "$TAG" "$APK" --target "$GITHUB_SHA" --title "ONYX TV ${VN}" --notes "$NOTES"
           fi
