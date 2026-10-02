@@ -58,6 +58,10 @@ class XtreamClient(
     fun xmltvUrl(src: PlaylistSource.Xtream): String =
         "${base(src)}/xmltv.php?username=${enc(src.username)}&password=${enc(src.password)}"
 
+    /** Liste M3U du compte : son en-tête `url-tvg` indique l'adresse du guide que les autres apps utilisent. */
+    fun m3uUrl(src: PlaylistSource.Xtream): String =
+        "${base(src)}/get.php?username=${enc(src.username)}&password=${enc(src.password)}&type=m3u_plus&output=ts"
+
     /** URL d'authentification (sans action) : renvoie user_info / server_info. */
     private fun authUrl(src: PlaylistSource.Xtream): String =
         "${base(src)}/player_api.php?username=${enc(src.username)}&password=${enc(src.password)}"

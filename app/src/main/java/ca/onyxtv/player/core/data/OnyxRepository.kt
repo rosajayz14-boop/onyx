@@ -172,8 +172,24 @@ class OnyxRepository(
     private val _epgStatus = kotlinx.coroutines.flow.MutableStateFlow<EpgStatus?>(null)
     val epgStatus: kotlinx.coroutines.flow.StateFlow<EpgStatus?> = _epgStatus
 
+    /**
+     * Adresse du guide annoncée par le M3U du compte (url-tvg). Si elle diffère de xmltv.php et
+     * qu'aucun guide supplémentaire n'est réglé, on l'enregistre : c'est celle que lisent
+     * TiviMate / Smarters quand ils chargent le compte comme une liste M3U.
+     */
+    suspend fun discoverTvgUrl(src: PlaylistSource.Xtream): String? {
+        val header = Http.firstLine(xt.m3uUrl(src)) ?: return null
+        val found = M3uParser.epgUrlFromHeader(header) ?: return null
+        val same = found.substringBefore('?').trimEnd('/').equals(xt.xmltvUrl(src).substringBefore('?').trimEnd('/'), true)
+        if (!same && src.extraEpgUrl.isNullOrBlank()) {
+            runCatching { store.update(src.id) { s -> (s as? PlaylistSource.Xtream)?.copy(extraEpgUrl = found) ?: s } }
+        }
+        return found
+    }
+
     /** Précharge le guide des comptes (appelé après le chargement du catalogue) : le Guide TV s'ouvre déjà rempli. */
     suspend fun prefetchEpg(channels: List<Channel> = emptyList()) {
+        store.sources.first().filterIsInstance<PlaylistSource.Xtream>().forEach { runCatching { discoverTvgUrl(it) } }
         var programmes = 0; var guideChannels = 0; var matched = 0; var checked = 0; var coverageEnd = 0L
         val details = ArrayList<String>()
         epgUrls().forEach { url ->
@@ -209,8 +225,14 @@ class OnyxRepository(
         if (sources.isEmpty()) return@withContext "Aucune source configurée."
         val sb = StringBuilder()
         val fmt = java.text.SimpleDateFormat("dd/MM HH:mm", java.util.Locale.getDefault())
+        // En-tête du M3U du compte : adresse du guide « officielle » du fournisseur.
+        sources.filterIsInstance<PlaylistSource.Xtream>().forEach { src ->
+            val tvg = runCatching { discoverTvgUrl(src) }.getOrNull()
+            sb.append("■ ${src.label} · en-tête du M3U (get.php) : url-tvg = ${tvg?.let { maskUrl(it) } ?: "absent"}\n")
+        }
+        val sources2 = store.sources.first()   // relu : un url-tvg découvert a pu être enregistré
         data class Entry(val label: String, val url: String?, val src: PlaylistSource)
-        val entries = sources.flatMap { src ->
+        val entries = sources2.flatMap { src ->
             when (src) {
                 is PlaylistSource.Xtream -> listOf(Entry(src.label, xt.xmltvUrl(src), src)) +
                     listOfNotNull(src.extraEpgUrl?.takeIf { it.isNotBlank() }?.let { Entry("${src.label} · guide supplémentaire", it, src) })
@@ -242,6 +264,16 @@ class OnyxRepository(
                 sb.append("  Début : ${head}\n")
                 // Fin du fichier : un export complet se termine par </tv>. Sinon le serveur a coupé
                 // la génération (temps limite PHP, etc.) et les jours suivants n'y sont jamais.
+                // Même export avec un User-Agent Android standard ? (taille et dernière date)
+                if (src is PlaylistSource.Xtream && label == src.label) runCatching {
+                    val alt = java.io.File(tmp.parentFile, tmp.name + ".ua")
+                    try {
+                        Http.getToFileWithUa(url, alt, "Dalvik/2.1.0 (Linux; U; Android 11; AFTKA Build/RS8104)")
+                        val altList = alt.inputStream().buffered().use { XmltvParser.parse(it, Long.MIN_VALUE, Long.MAX_VALUE) }
+                        sb.append("  Avec un User-Agent Android standard : ${ca.onyxtv.player.core.net.StreamProbe.fmtSize(alt.length())} · ${XmltvParser.lastProgrammeTags} programmes · dernier horodatage « ${XmltvParser.lastLastStartRaw} »\n")
+                        if (altList.isNotEmpty()) Unit
+                    } finally { alt.delete() }
+                }
                 if (!gz) {
                     val tail = java.io.RandomAccessFile(tmp, "r").use { raf ->
                         val n = minOf(300L, raf.length()).toInt(); raf.seek(raf.length() - n)

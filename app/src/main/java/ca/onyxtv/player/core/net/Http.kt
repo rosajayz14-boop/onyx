@@ -47,6 +47,28 @@ object Http {
         file
     }
 
+    /** Première ligne d'une réponse (en-tête #EXTM3U) sans télécharger le reste. */
+    suspend fun firstLine(url: String): String? = withContext(Dispatchers.IO) {
+        val request = Request.Builder().url(url).header("User-Agent", UA).build()
+        runCatching {
+            client.newCall(request).execute().use { resp ->
+                if (!resp.isSuccessful) return@use null
+                resp.body?.source()?.readUtf8Line()
+            }
+        }.getOrNull()
+    }
+
+    /** Télécharge vers [file] avec un User-Agent précis (test : certains panneaux servent un export différent). */
+    suspend fun getToFileWithUa(url: String, file: java.io.File, userAgent: String): java.io.File = withContext(Dispatchers.IO) {
+        val request = Request.Builder().url(url).header("User-Agent", userAgent).build()
+        bulk.newCall(request).execute().use { resp ->
+            if (!resp.isSuccessful) throw IOException("HTTP ${resp.code}")
+            val body = resp.body ?: throw IOException("Réponse vide")
+            body.byteStream().use { input -> file.outputStream().buffered().use { out -> input.copyTo(out, 64 * 1024) } }
+        }
+        file
+    }
+
     suspend fun get(url: String): String = withContext(Dispatchers.IO) {
         val request = Request.Builder().url(url).header("User-Agent", UA).build()
         client.newCall(request).execute().use { resp ->
