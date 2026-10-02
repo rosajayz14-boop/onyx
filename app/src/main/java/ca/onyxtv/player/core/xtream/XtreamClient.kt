@@ -290,6 +290,12 @@ class XtreamClient(
     suspend fun simpleDataTable(src: PlaylistSource.Xtream, streamId: String): List<EpgProgram> =
         epgListings(src, "get_simple_data_table", "&stream_id=$streamId", streamId)
 
+    /** Réponse BRUTE (début) de l'API EPG par chaîne — pour le test du guide. */
+    suspend fun epgRaw(src: PlaylistSource.Xtream, action: String, streamId: String): String = withContext(Dispatchers.IO) {
+        runCatching { Http.get(api(src, action, "&stream_id=$streamId")).replace(Regex("\\s+"), " ").take(160) }
+            .getOrElse { "ERREUR " + Http.describe(it) }
+    }
+
     private suspend fun epgListings(src: PlaylistSource.Xtream, action: String, extra: String, streamId: String): List<EpgProgram> =
         withContext(Dispatchers.IO) {
             val root = runCatching { json.parseToJsonElement(Http.get(api(src, action, extra))) }.getOrNull()

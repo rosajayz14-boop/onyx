@@ -216,6 +216,13 @@ class OnyxRepository(
 
     private fun maskUrl(url: String) = url.replace(Regex("(password=)[^&]+"), "$1•••")
 
+    /** Fin de couverture réelle d'un guide (hors « programmes » de remplissage de plus de 12 h). */
+    private fun coverageEnd(list: List<EpgProgram>): Long {
+        var end = 0L
+        list.forEach { if (it.stop - it.start <= 12 * 3_600_000L && it.stop > end) end = it.stop }
+        return end
+    }
+
     /**
      * Test complet du guide pour l'écran Réglages : adresse, réponse du serveur, programmes,
      * chaînes du guide, appariement avec les chaînes du compte, exemples non appariés.
@@ -319,6 +326,10 @@ class OnyxRepository(
                                 carry = text.takeLast(200)
                             }
                         }
+                    }
+                    mine.firstOrNull()?.let { c ->
+                        sb.append("  Réponse brute get_short_epg « ${c.name} » : ${xt.epgRaw(src, "get_short_epg", c.streamId!!)}\n")
+                        sb.append("  Réponse brute get_simple_data_table : ${xt.epgRaw(src, "get_simple_data_table", c.streamId!!)}\n")
                     }
                     mine.forEach { c ->
                         sb.append("  « ${c.name} » [${c.epgChannelId}] · dans le fichier xmltv : ${rawCounts[c.epgChannelId] ?: 0} programme(s)\n")
@@ -476,7 +487,9 @@ class OnyxRepository(
                     val fromDisk = runCatching {
                         withContext(Dispatchers.IO) { epgJson.decodeFromString(epgListSer, disk.readText()) }
                     }.getOrNull()
-                    if (fromDisk != null) {
+                    // Guide sur disque PÉRIMÉ (ne couvre plus l'heure actuelle) : on retélécharge
+                    // dès que 2 h se sont écoulées, au lieu d'attendre 24 h.
+                    if (fromDisk != null && (coverageEnd(fromDisk) >= now || now - disk.lastModified() < STALE_RETRY_MS)) {
                         synchronized(xmltvByUrl) { xmltvByUrl[url] = Cached(disk.lastModified(), fromDisk) }
                         return@withLock fromDisk
                     }
@@ -500,7 +513,9 @@ class OnyxRepository(
                 }
             }.getOrDefault(emptyList())
             if (parsed.isNotEmpty()) {
-                synchronized(xmltvByUrl) { xmltvByUrl[url] = Cached(now, parsed) }
+                // Guide reçu mais périmé côté serveur : nouvel essai dans 2 h (le fournisseur peut le remettre à jour).
+                val at = if (coverageEnd(parsed) >= now) now else now - XMLTV_TTL_MS + STALE_RETRY_MS
+                synchronized(xmltvByUrl) { xmltvByUrl[url] = Cached(at, parsed) }
                 runCatching {
                     withContext(Dispatchers.IO) {
                         epgFile(url)?.writeText(epgJson.encodeToString(epgListSer, parsed))
@@ -577,5 +592,6 @@ class OnyxRepository(
     private companion object {
         const val EPG_TTL_MS = 30 * 60_000L        // now/next Xtream : 30 min
         const val XMLTV_TTL_MS = 24 * 3_600_000L   // guide XMLTV : une fois par jour
+        const val STALE_RETRY_MS = 2 * 3_600_000L  // guide périmé côté serveur : nouvel essai toutes les 2 h
     }
 }
