@@ -90,6 +90,8 @@ data class PlayTarget(
     val startPositionMs: Long = 0L,
     /** Contenu à enchaîner automatiquement à la fin (épisode suivant), null sinon. */
     val next: PlayTarget? = null,
+    /** Série d'origine (épisode) : rangée « Continuer la série ». */
+    val seriesId: String? = null,
 )
 
 /**
@@ -418,6 +420,7 @@ fun PlayerScreen(
             }
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 if (isPlaying) { error = null; liveRetries = 0 }
+                PlaybackBridge.pipEligible = !currentTarget.isLive && exo.playWhenReady && error == null && !ended
                 // Pas de veille pendant la lecture ; en pause/erreur, l'écran peut s'éteindre normalement.
                 runCatching { playerView?.keepScreenOn = exo.playWhenReady && !ended && error == null }
             }
@@ -473,7 +476,13 @@ fun PlayerScreen(
         }
         exo.addListener(listener)
         exo.addAnalyticsListener(analytics)
+        // MediaSession : touches média système, commandes vocales (Alexa / Google), « en lecture ».
+        val session = runCatching {
+            androidx.media3.session.MediaSession.Builder(context, exo).setId("onyx-" + System.identityHashCode(exo)).build()
+        }.getOrNull()
         onDispose {
+            PlaybackBridge.pipEligible = false
+            runCatching { session?.release() }
             exo.removeListener(listener)
             exo.removeAnalyticsListener(analytics)
             exo.release()

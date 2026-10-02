@@ -104,7 +104,11 @@ fun HomeScreen(
     // Les contenus des catégories verrouillées ne doivent pas réapparaître via « Reprendre ».
     val hiddenIdSet = remember(state.channels, state.vod, hidden) { hiddenIds(state.channels, state.vod, hidden) }
     val visibleRecents = remember(recents, hiddenIdSet) { if (hiddenIdSet.isEmpty()) recents else recents.filterNot { it.id in hiddenIdSet } }
-    val resumable = remember(visibleRecents) { visibleRecents.filter { it.resumable } }
+    // Épisodes : un seul par série (le plus récent) dans « Continuer la série » ; le reste dans « Reprendre ».
+    val seriesRecents = remember(visibleRecents) { visibleRecents.filter { it.seriesId != null && !it.finished }.distinctBy { it.seriesId } }
+    val otherRecents = remember(visibleRecents) { visibleRecents.filter { it.seriesId == null } }
+    val vodById = remember(vod) { vod.associateBy { it.id } }
+    val resumable = remember(otherRecents) { otherRecents.filter { it.resumable } }
     // Favoris dans L'ORDRE choisi par l'utilisateur (menu appui long : Monter / Descendre).
     val favChannels = remember(channels, favorites) { val byId = channels.associateBy { it.id }; favorites.mapNotNull { byId[it] } }
     // Appui long sur une carte film/série : favoris en premier, puis fiche / lecture.
@@ -211,10 +215,43 @@ fun HomeScreen(
                 onLive = onGoLive,
             )
         }
-        if (visibleRecents.isNotEmpty()) {
+        if (seriesRecents.isNotEmpty()) {
+            item(key = "series") {
+                Rail("Continuer la série") {
+                    items(seriesRecents.take(20), key = { "s" + it.id }) { r ->
+                        val series = r.seriesId?.let { vodById[it] }
+                        MediaCard(
+                            title = series?.name ?: r.subtitle ?: r.title,
+                            subtitle = r.title,
+                            imageUrl = series?.posterUrl ?: r.imageUrl,
+                            seed = r.seriesId ?: r.id,
+                            width = 130.dp,
+                            aspectRatio = 2f / 3f,
+                            initials = (series?.name ?: r.title).take(1).uppercase(),
+                            progress = if (r.resumable) r.progress else null,
+                            badge = "SÉRIE",
+                            onClick = { onPlay(vm.freshTarget(r)) },
+                            onLongClick = {
+                                showMenu(
+                                    ca.onyxtv.player.ui.components.ContextMenuRequest(
+                                        title = series?.name ?: r.title, subtitle = r.title,
+                                        actions = buildList {
+                                            add(MenuAction(if (r.resumable) "▶ Reprendre l'épisode" else "▶ Lire l'épisode") { onPlay(vm.freshTarget(r)) })
+                                            if (series != null) add(MenuAction("Ouvrir la série") { openVod(series) })
+                                            add(MenuAction("✕ Retirer") { vm.removeRecent(r.id) })
+                                        },
+                                    )
+                                )
+                            },
+                        )
+                    }
+                }
+            }
+        }
+        if (otherRecents.isNotEmpty()) {
             item(key = "resume") {
                 Rail("Reprendre") {
-                    items(visibleRecents.take(20), key = { it.id }) { r ->
+                    items(otherRecents.take(20), key = { it.id }) { r ->
                         MediaCard(
                             title = r.title,
                             subtitle = r.subtitle,

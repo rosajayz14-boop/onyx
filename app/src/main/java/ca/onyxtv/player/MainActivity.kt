@@ -29,6 +29,21 @@ class MainActivity : ComponentActivity() {
         // build 44 qui avait gelé l'app.
     }
 
+    /** Accueil pendant un film : image dans l'image (si le boîtier le permet, Android 8+). */
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O &&
+            ca.onyxtv.player.player.PlaybackBridge.pipEligible &&
+            packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_PICTURE_IN_PICTURE)
+        ) {
+            runCatching {
+                enterPictureInPictureMode(
+                    android.app.PictureInPictureParams.Builder().setAspectRatio(android.util.Rational(16, 9)).build()
+                )
+            }
+        }
+    }
+
     /** On NOTE la touche (diagnostic) mais on ne la consomme JAMAIS : laisser passer les flèches. */
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         FocusBridge.note(event)

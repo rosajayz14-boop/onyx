@@ -75,6 +75,7 @@ fun RecentItem.toPlayTarget() = PlayTarget(
     imageUrl = imageUrl,
     isLive = live,
     startPositionMs = if (resumable) positionMs else 0L,
+    seriesId = seriesId,
 )
 
 // ---- Dégradés de repli pour les vignettes sans logo/affiche ----

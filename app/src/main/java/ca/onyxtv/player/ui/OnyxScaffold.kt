@@ -113,6 +113,25 @@ fun OnyxRoot(vm: OnyxViewModel = viewModel()) {
     // Zap par numéro depuis Accueil / Direct / Guide (chiffres de la télécommande).
     var zapDigits by remember { mutableStateOf("") }
 
+    // Choix du profil à l'ouverture (quand il y en a plusieurs), AVANT le PIN du profil.
+    val profiles by vm.profiles.collectAsStateWithLifecycle()
+    val profileChosen by vm.profileChosen.collectAsStateWithLifecycle()
+    val prefsEarly by vm.prefs.collectAsStateWithLifecycle()
+    if (profiles.size > 1 && prefsEarly.askProfileAtStart && !profileChosen) {
+        FocusRoot {
+            Column(
+                Modifier.align(Alignment.Center).width(520.dp).clip(RoundedCornerShape(16.dp)).background(OnyxSurfaceHi).padding(28.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text("Qui regarde ?", style = MaterialTheme.typography.headlineMedium, color = OnyxText)
+                profiles.forEach { pr ->
+                    androidx.tv.material3.Button(onClick = { vm.setActiveProfile(pr.id) }, modifier = Modifier.fillMaxWidth()) { Text("👤 " + pr.name) }
+                }
+            }
+        }
+        return
+    }
+
     // Verrouillage de l'application au démarrage (contrôle parental).
     val parental by vm.parental.collectAsStateWithLifecycle()
     val appUnlocked by vm.appUnlocked.collectAsStateWithLifecycle()

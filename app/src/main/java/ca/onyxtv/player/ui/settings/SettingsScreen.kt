@@ -86,6 +86,7 @@ fun SettingsScreen(vm: OnyxViewModel) {
                 )
             }
         }
+        item { ProfilesCard(vm) }
         item { UpdateCard(vm, state) }
         item { Text("Sources configurées", style = MaterialTheme.typography.titleLarge) }
 
@@ -431,6 +432,34 @@ private fun PlaybackCard(vm: OnyxViewModel) {
             }) { Text("Taille ×${prefs.subtitleScale}") }
             Button(onClick = { vm.setSubtitleStyle(background = !prefs.subtitleBackground) }) { Text("Fond : ${if (prefs.subtitleBackground) "sombre" else "aucun"}") }
             Button(onClick = { vm.setSubtitleStyle(yellow = !prefs.subtitleYellow) }) { Text("Couleur : ${if (prefs.subtitleYellow) "jaune" else "blanc"}") }
+        }
+    }
+}
+
+/** Profils : favoris, récents, rappels et contrôle parental séparés par personne. */
+@Composable
+private fun ProfilesCard(vm: OnyxViewModel) {
+    val profiles by vm.profiles.collectAsStateWithLifecycle()
+    val active by vm.activeProfile.collectAsStateWithLifecycle()
+    val prefs by vm.prefs.collectAsStateWithLifecycle()
+    var newName by remember { mutableStateOf("") }
+    var confirmDelete by remember { mutableStateOf<String?>(null) }
+    FormCard("Profils") {
+        Text("Chaque profil a ses favoris, ses reprises, ses rappels et son contrôle parental. Les sources et les réglages de lecture sont communs.", color = OnyxMuted, style = MaterialTheme.typography.bodyMedium)
+        profiles.forEach { pr ->
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                Button(onClick = { vm.setActiveProfile(pr.id) }) { Text((if (pr.id == active) "✓ " else "") + pr.name) }
+                if (pr.id.isNotEmpty()) Button(onClick = {
+                    if (confirmDelete == pr.id) { vm.removeProfile(pr.id); confirmDelete = null } else confirmDelete = pr.id
+                }) { Text(if (confirmDelete == pr.id) "Confirmer la suppression ?" else "Supprimer") }
+            }
+        }
+        Field("Nouveau profil (nom)", newName) { newName = it }
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Button(onClick = { if (newName.isNotBlank()) { vm.addProfile(newName); newName = "" } }) { Text("＋ Ajouter le profil") }
+            if (profiles.size > 1) Button(onClick = { vm.setAskProfileAtStart(!prefs.askProfileAtStart) }) {
+                Text("Demander le profil à l'ouverture : ${if (prefs.askProfileAtStart) "Oui" else "Non"}")
+            }
         }
     }
 }

@@ -606,6 +606,7 @@ class OnyxViewModel(app: Application) : AndroidViewModel(app) {
                     live = target.isLive,
                     positionMs = positionMs,
                     durationMs = durationMs,
+                    seriesId = target.seriesId,
                 )
             )
         }
@@ -614,6 +615,42 @@ class OnyxViewModel(app: Application) : AndroidViewModel(app) {
     fun removeRecent(id: String) {
         viewModelScope.launch { userStore.removeRecent(id) }
     }
+
+    /** « Marquer comme vu / non vu » un épisode (menu appui long de la fiche série). */
+    fun markWatched(ep: ca.onyxtv.player.core.model.Episode, series: VodItem, watched: Boolean) {
+        viewModelScope.launch {
+            if (!watched) { userStore.removeRecent(ep.id); return@launch }
+            val dur = ((ep.durationSecs ?: 3600) * 1000L)
+            userStore.recordRecent(
+                RecentItem(
+                    id = ep.id, title = "S${ep.season}E${ep.number} · ${ep.title}", subtitle = series.name,
+                    url = ep.url, imageUrl = ep.imageUrl ?: series.posterUrl, live = false,
+                    positionMs = dur, durationMs = dur, seriesId = series.id,
+                )
+            )
+        }
+    }
+
+    // ---- Profils ----
+    val profiles: StateFlow<List<ca.onyxtv.player.core.data.Profile>> =
+        userStore.profiles.stateIn(viewModelScope, SharingStarted.Eagerly, listOf(ca.onyxtv.player.core.data.Profile("", "Principal")))
+    val activeProfile: StateFlow<String> = userStore.activeProfile.stateIn(viewModelScope, SharingStarted.Eagerly, "")
+    private val _profileChosen = MutableStateFlow(false)
+    /** Vrai une fois le profil choisi (ou confirmé) dans cette session. */
+    val profileChosen: StateFlow<Boolean> = _profileChosen.asStateFlow()
+    fun confirmProfile() { _profileChosen.value = true }
+    fun setActiveProfile(id: String) {
+        viewModelScope.launch {
+            userStore.setActiveProfile(id)
+            // Nouveau profil = nouveau contrôle parental : on referme ce qui était déverrouillé.
+            _unlockedGroups.value = emptySet()
+            _appUnlocked.value = false
+            _profileChosen.value = true
+        }
+    }
+    fun addProfile(name: String) { viewModelScope.launch { userStore.addProfile(name) } }
+    fun removeProfile(id: String) { viewModelScope.launch { userStore.removeProfile(id) } }
+    fun setAskProfileAtStart(ask: Boolean) { viewModelScope.launch { userStore.updatePrefs { it.copy(askProfileAtStart = ask) } } }
 
     /**
      * Cible de lecture d'un récent avec l'URL ACTUELLE du catalogue. L'URL mémorisée au moment

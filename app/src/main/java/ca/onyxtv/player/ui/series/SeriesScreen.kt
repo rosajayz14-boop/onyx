@@ -96,6 +96,7 @@ fun SeriesScreen(
                 lastWatchedId = recents.firstOrNull { r -> detail.seasons.values.any { eps -> eps.any { it.id == r.id } } }?.id,
                 onPlay = onPlay,
                 onBack = onBack,
+                onMarkWatched = { ep, w -> vm.markWatched(ep, item, w) },
                 active = active,
             )
         }
@@ -115,7 +116,9 @@ private fun SeriesContent(
     onPlay: (PlayTarget) -> Unit,
     onBack: () -> Unit,
     active: Boolean,
+    onMarkWatched: (Episode, Boolean) -> Unit = { _, _ -> },
 ) {
+    val showMenu = ca.onyxtv.player.ui.components.LocalContextMenu.current
     val seasons = detail.seasonNumbers
     // Tous les épisodes dans l'ordre de visionnage (saison puis numéro).
     val ordered = remember(detail) { seasons.flatMap { detail.seasons[it].orEmpty() } }
@@ -163,6 +166,7 @@ private fun SeriesContent(
             isLive = false,
             startPositionMs = positionById[ep.id] ?: 0L,
             next = following?.let { target(it) },
+            seriesId = item.id,
         )
     }
 
@@ -246,6 +250,19 @@ private fun SeriesContent(
                     ListItem(
                         selected = false,
                         onClick = { onPlay(target(ep)) },
+                        onLongClick = {
+                            val seen = ep.id in finishedIds
+                            showMenu(
+                                ca.onyxtv.player.ui.components.ContextMenuRequest(
+                                    title = "E${ep.number} · ${ep.title}", subtitle = "Saison ${ep.season}",
+                                    actions = listOf(
+                                        ca.onyxtv.player.ui.components.MenuAction(if (seen) "Marquer comme non vu" else "✓ Marquer comme vu") { onMarkWatched(ep, !seen) },
+                                        ca.onyxtv.player.ui.components.MenuAction("▶ Lire") { onPlay(target(ep)) },
+                                        ca.onyxtv.player.ui.components.MenuAction("↺ Depuis le début") { onPlay(target(ep).copy(startPositionMs = 0L)) },
+                                    ),
+                                )
+                            )
+                        },
                         headlineContent = {
                             Text("E${ep.number} · ${ep.title}", maxLines = 1, overflow = TextOverflow.Ellipsis)
                         },
