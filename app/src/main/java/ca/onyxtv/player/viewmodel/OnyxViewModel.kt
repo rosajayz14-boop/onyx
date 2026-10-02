@@ -486,9 +486,11 @@ class OnyxViewModel(app: Application) : AndroidViewModel(app) {
     /** Guide XMLTV supplémentaire d'un compte Xtream (vide = aucun), puis rechargement du guide. */
     fun setExtraEpgUrl(sourceId: String, url: String) {
         viewModelScope.launch {
-            val clean = url.trim().takeIf { it.startsWith("http", true) }
+            // Plusieurs URL possibles (espaces, virgules, retours à la ligne) : on ne garde que les http(s).
+            val clean = url.split(Regex("[\\s,;]+")).map { it.trim() }.filter { it.startsWith("http", true) }.distinct()
+                .joinToString(" ").takeIf { it.isNotBlank() }
             store.update(sourceId) { if (it is PlaylistSource.Xtream) it.copy(extraEpgUrl = clean) else it }
-            _sourceStatus.value = if (clean == null) "Guide supplémentaire retiré." else "Guide supplémentaire enregistré — téléchargement…"
+            _sourceStatus.value = if (clean == null) "Guides supplémentaires retirés." else "Guides supplémentaires enregistrés — téléchargement…"
             refreshEpg()
         }
     }

@@ -132,13 +132,28 @@ fun SettingsScreen(vm: OnyxViewModel) {
                         // Guide supplémentaire : quand le guide du fournisseur est périmé ou incomplet.
                         var extra by remember(s.id, s.extraEpgUrl) { mutableStateOf(s.extraEpgUrl ?: "") }
                         Text(
-                            "Guide supplémentaire (URL XMLTV publique, ex. un guide « epg.pw » ou « iptv-org » pour vos chaînes) : fusionné avec le guide du fournisseur, le plus à jour des deux est affiché.",
+                            "Guides supplémentaires (XMLTV publics) : quand le guide du fournisseur est périmé, les chaînes sont appariées par nom à ces guides et le plus à jour est affiché. Un clic par pays ajoute le guide public epgshare01 correspondant ; plusieurs URL possibles, séparées par des espaces.",
                             color = OnyxMuted, style = MaterialTheme.typography.bodyMedium,
                         )
-                        Field("URL du guide supplémentaire (XMLTV, .xml ou .xml.gz)", extra, KeyboardType.Uri) { extra = it }
+                        val presets = listOf(
+                            "Canada" to "https://epgshare01.online/epgshare01/epg_ripper_CA1.xml.gz",
+                            "États-Unis" to "https://epgshare01.online/epgshare01/epg_ripper_US1.xml.gz",
+                            "France" to "https://epgshare01.online/epgshare01/epg_ripper_FR1.xml.gz",
+                            "Royaume-Uni" to "https://epgshare01.online/epgshare01/epg_ripper_UK1.xml.gz",
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            presets.forEach { (name, url) ->
+                                val on = extra.contains(url)
+                                Button(onClick = {
+                                    extra = if (on) extra.replace(url, "").trim().replace(Regex("\\s{2,}"), " ") else (extra + " " + url).trim()
+                                    vm.setExtraEpgUrl(s.id, extra)
+                                }) { Text((if (on) "✓ " else "+ ") + name) }
+                            }
+                        }
+                        Field("URL des guides supplémentaires (XMLTV, .xml ou .xml.gz, séparées par des espaces)", extra, KeyboardType.Uri) { extra = it }
                         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            Button(onClick = { vm.setExtraEpgUrl(s.id, extra) }) { Text("Enregistrer le guide supplémentaire") }
-                            if (!s.extraEpgUrl.isNullOrBlank()) Button(onClick = { extra = ""; vm.setExtraEpgUrl(s.id, "") }) { Text("Retirer") }
+                            Button(onClick = { vm.setExtraEpgUrl(s.id, extra) }) { Text("Enregistrer les guides supplémentaires") }
+                            if (!s.extraEpgUrl.isNullOrBlank()) Button(onClick = { extra = ""; vm.setExtraEpgUrl(s.id, "") }) { Text("Tout retirer") }
                         }
                     }
                 }

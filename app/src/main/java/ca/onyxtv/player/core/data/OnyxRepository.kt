@@ -123,6 +123,12 @@ class OnyxRepository(
     private val xmltvByUrl = HashMap<String, Cached<List<EpgProgram>>>()
     /** Index du guide par identifiant de chaîne NORMALISÉ (construit une fois par téléchargement). */
     private val xmltvIndexByUrl = HashMap<String, Pair<Long, Map<String, List<EpgProgram>>>>()
+    /** Noms affichés (<display-name>) par identifiant, par URL de guide : alias d'appariement. */
+    private val namesByUrl = HashMap<String, Map<String, List<String>>>()
+
+    /** Guides supplémentaires d'un compte : plusieurs URL séparées par des espaces, virgules ou retours à la ligne. */
+    private fun extraEpgUrls(src: PlaylistSource.Xtream): List<String> =
+        src.extraEpgUrl.orEmpty().split(Regex("[\\s,;]+")).map { it.trim() }.filter { it.startsWith("http", true) }.distinct()
 
     /**
      * Normalise un identifiant/nom de chaîne pour l'appariement EPG : minuscules, sans accents,
@@ -142,7 +148,17 @@ class OnyxRepository(
         val all = xmltv(url)
         val stamp = synchronized(xmltvByUrl) { xmltvByUrl[url]?.at } ?: 0L
         synchronized(xmltvIndexByUrl) { xmltvIndexByUrl[url]?.let { (at, idx) -> if (at == stamp) return idx } }
-        val idx = withContext(Dispatchers.Default) { all.groupBy { normChan(it.channelId) } }
+        val names = synchronized(namesByUrl) { namesByUrl[url] }.orEmpty()
+        val idx = withContext(Dispatchers.Default) {
+            val base = HashMap(all.groupBy { normChan(it.channelId) })
+            // Alias par nom affiché : « A&E HD » → programmes de l'identifiant « AandE.ca ». Un guide
+            // public n'a pas les identifiants du fournisseur ; ses noms, eux, ressemblent aux chaînes.
+            names.forEach { (id, dn) ->
+                val list = base[normChan(id)] ?: return@forEach
+                dn.forEach { n -> val k = normChan(n); if (k.isNotBlank() && k !in base) base[k] = list }
+            }
+            base
+        }
         synchronized(xmltvIndexByUrl) { xmltvIndexByUrl[url] = stamp to idx }
         return idx
     }
@@ -327,7 +343,7 @@ class OnyxRepository(
         val entries = sources2.flatMap { src ->
             when (src) {
                 is PlaylistSource.Xtream -> listOf(Entry(src.label, xt.xmltvUrl(src), src)) +
-                    listOfNotNull(src.extraEpgUrl?.takeIf { it.isNotBlank() }?.let { Entry("${src.label} · guide supplémentaire", it, src) })
+                    extraEpgUrls(src).map { Entry("${src.label} · guide supplémentaire", it, src) }
                 is PlaylistSource.M3u -> listOf(Entry(src.label, src.epgUrl?.takeIf { it.isNotBlank() }, src))
             }
         }
@@ -468,13 +484,18 @@ class OnyxRepository(
 
     private fun epgDir(): java.io.File? = Http.dataDir?.resolve("epg")?.apply { mkdirs() }
     private fun epgFile(url: String): java.io.File? = epgDir()?.resolve("epg-${url.hashCode()}.json")
+    private fun epgNamesFile(url: String): java.io.File? = epgDir()?.resolve("epg-${url.hashCode()}.names.json")
+    private val epgNamesSer = kotlinx.serialization.builtins.MapSerializer(
+        kotlinx.serialization.serializer<String>(),
+        kotlinx.serialization.builtins.ListSerializer(kotlinx.serialization.serializer<String>()),
+    )
     private val epgJson = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
     private val epgListSer = kotlinx.serialization.builtins.ListSerializer(EpgProgram.serializer())
 
     /** Toutes les URL de guide des sources configurées (xmltv.php des comptes + EPG des M3U). */
     private suspend fun epgUrls(): List<String> = store.sources.first().flatMap { s ->
         when (s) {
-            is PlaylistSource.Xtream -> listOfNotNull(xt.xmltvUrl(s), s.extraEpgUrl?.takeIf { it.isNotBlank() })
+            is PlaylistSource.Xtream -> listOf(xt.xmltvUrl(s)) + extraEpgUrls(s)
             is PlaylistSource.M3u -> listOfNotNull(s.epgUrl?.takeIf { it.isNotBlank() })
         }
     }
@@ -530,7 +551,7 @@ class OnyxRepository(
                 val idx = runCatching { xmltvIndex(xt.xmltvUrl(src)) }.getOrDefault(emptyMap())
                 var fromXmltv = matchInIndex(idx, channel.epgChannelId, channel.name)
                 // Guide supplémentaire (URL publique) : on garde la liste la plus à jour des deux.
-                src.extraEpgUrl?.takeIf { it.isNotBlank() }?.let { extra ->
+                extraEpgUrls(src).forEach { extra ->
                     val idx2 = runCatching { xmltvIndex(extra) }.getOrDefault(emptyMap())
                     fromXmltv = freshest(fromXmltv, matchInIndex(idx2, channel.epgChannelId, channel.name))
                 }
@@ -588,6 +609,10 @@ class OnyxRepository(
                     // Guide sur disque PÉRIMÉ (ne couvre plus l'heure actuelle) : on retélécharge
                     // dès que 2 h se sont écoulées, au lieu d'attendre 24 h.
                     if (fromDisk != null && (coverageEnd(fromDisk) >= now || now - disk.lastModified() < STALE_RETRY_MS)) {
+                        runCatching {
+                            val nf = epgNamesFile(url)
+                            if (nf != null && nf.exists()) synchronized(namesByUrl) { namesByUrl[url] = withContext(Dispatchers.IO) { epgJson.decodeFromString(epgNamesSer, nf.readText()) } }
+                        }
                         synchronized(xmltvByUrl) { xmltvByUrl[url] = Cached(disk.lastModified(), fromDisk) }
                         return@withLock fromDisk
                     }
@@ -613,10 +638,13 @@ class OnyxRepository(
             if (parsed.isNotEmpty()) {
                 // Guide reçu mais périmé côté serveur : nouvel essai dans 2 h (le fournisseur peut le remettre à jour).
                 val at = if (coverageEnd(parsed) >= now) now else now - XMLTV_TTL_MS + STALE_RETRY_MS
+                val names = XmltvParser.lastDisplayNames
+                synchronized(namesByUrl) { namesByUrl[url] = names }
                 synchronized(xmltvByUrl) { xmltvByUrl[url] = Cached(at, parsed) }
                 runCatching {
                     withContext(Dispatchers.IO) {
                         epgFile(url)?.writeText(epgJson.encodeToString(epgListSer, parsed))
+                        epgNamesFile(url)?.writeText(epgJson.encodeToString(epgNamesSer, names))
                     }
                 }
             } else {

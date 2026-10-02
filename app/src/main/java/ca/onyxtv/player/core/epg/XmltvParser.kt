@@ -24,6 +24,9 @@ object XmltvParser {
     @Volatile var lastTooOld: Int = 0
     @Volatile var lastTooFar: Int = 0
     @Volatile var lastFiller: Int = 0
+    /** Noms affichés (<display-name>) par identifiant de chaîne du dernier guide lu : permet
+     *  d'apparier un guide public dont les identifiants ne ressemblent pas aux noms des chaînes. */
+    @Volatile var lastDisplayNames: Map<String, List<String>> = emptyMap()
     @Volatile var lastMinStart: Long = Long.MAX_VALUE
     @Volatile var lastMaxStop: Long = 0L
 
@@ -59,6 +62,8 @@ object XmltvParser {
         val open = ArrayList<EpgProgram>()   // programmes sans <stop> : clôturés par le suivant
         var inProgramme = false
         var current: String? = null
+        var chanId: String? = null
+        val names = HashMap<String, MutableList<String>>()
 
         try { while (event != XmlPullParser.END_DOCUMENT) {
             when (event) {
@@ -77,17 +82,21 @@ object XmltvParser {
                         current = parser.name
                         if (parser.name == "title") titleLang = parser.getAttributeValue(null, "lang")?.lowercase()
                     }
+                    "channel" -> if (!inProgramme) chanId = parser.getAttributeValue(null, "id")
+                    "display-name" -> if (!inProgramme && chanId != null) current = "display-name"
                 }
-                XmlPullParser.TEXT -> if (inProgramme && current != null) {
+                XmlPullParser.TEXT -> if (current != null) {
                     val text = parser.text?.trim().orEmpty()
                     if (text.isNotEmpty()) when (current) {
                         // Guides multilingues : on garde le premier titre, sauf si une version « fr » arrive.
-                        "title" -> if (title == null || titleLang?.startsWith("fr") == true) title = text
-                        "desc" -> desc = text
+                        "title" -> if (inProgramme && (title == null || titleLang?.startsWith("fr") == true)) title = text
+                        "desc" -> if (inProgramme) desc = text
+                        "display-name" -> chanId?.let { id -> names.getOrPut(id) { ArrayList(2) }.let { l -> if (l.size < 4 && text !in l) l += text } }
                     }
                 }
                 XmlPullParser.END_TAG -> when (parser.name) {
-                    "title", "desc" -> current = null
+                    "title", "desc", "display-name" -> current = null
+                    "channel" -> if (!inProgramme) chanId = null
                     "programme" -> {
                         val ch = channel
                         if (start > 0L) { if (start < lastMinStart) lastMinStart = start; if (stop > lastMaxStop) lastMaxStop = stop }
@@ -118,6 +127,7 @@ object XmltvParser {
             // Guide tronqué ou balise mal formée : on garde les programmes déjà lus.
             lastError = (e.javaClass.simpleName + ": " + e.message).take(200)
         }
+        lastDisplayNames = names
         if (open.isNotEmpty()) {
             val startsByChannel = (out + open).groupBy({ it.channelId }, { it.start }).mapValues { it.value.sorted() }
             open.forEach { p ->
