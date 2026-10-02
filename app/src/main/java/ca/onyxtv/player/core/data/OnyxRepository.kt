@@ -230,25 +230,26 @@ class OnyxRepository(
                 val err = XmltvParser.lastError
                 val firstStart = XmltvParser.lastFirstStartRaw
                 sb.append("  Balises <programme> lues : $tags · gardées (fenêtre −6 h / +48 h) : ${windowed.size} · écartées : ${XmltvParser.lastDropped}\n")
-                if (firstStart != null) sb.append("  Premier horodatage brut : « $firstStart »\n")
+                sb.append("  Écartées car : date illisible ${XmltvParser.lastUnparsable} · trop anciennes ${XmltvParser.lastTooOld} · trop lointaines ${XmltvParser.lastTooFar}\n")
+                if (XmltvParser.lastMaxStop > 0L) sb.append("  Le fichier couvre du ${fmt.format(java.util.Date(XmltvParser.lastMinStart))} au ${fmt.format(java.util.Date(XmltvParser.lastMaxStop))} · maintenant : ${fmt.format(java.util.Date(nowMs))}\n")
+                if (firstStart != null) sb.append("  Premier horodatage brut : « $firstStart » · dernier : « ${XmltvParser.lastLastStartRaw} »\n")
                 if (err != null) sb.append("  Erreur du parseur : $err\n")
                 if (tags == 0) {
                     sb.append("  → Le fichier ne contient AUCUN programme : le panneau ne fournit pas d'EPG pour ce compte (ou renvoie un guide vide). Demandez au fournisseur si l'EPG est inclus.\n")
                 } else if (windowed.isEmpty()) {
                     sb.append("  → Des programmes existent mais aucun dans les 48 h à venir : dates mal lues (format ci-dessus) ou guide périmé.\n")
                 }
-                val list = windowed
-                if (list.isEmpty()) {
-                    // Secours now/next du panneau (get_short_epg) sur 3 chaînes.
-                    if (src is PlaylistSource.Xtream) {
-                        val mine = channels.filter { it.id.startsWith("xt:${src.id}:") }.take(3)
-                        mine.forEach { c ->
-                            val r = runCatching { c.streamId?.let { xt.shortEpg(src, it, 8) }.orEmpty() }
-                            sb.append("  get_short_epg « ${c.name} » : ${r.getOrNull()?.size?.let { "$it programmes" } ?: ("ERREUR " + r.exceptionOrNull()?.let { Http.describe(it) })}\n")
-                        }
+                // Secours now/next du panneau (get_short_epg), toujours testé sur 3 chaînes.
+                if (src is PlaylistSource.Xtream) {
+                    val mine = channels.filter { it.id.startsWith("xt:${src.id}:") }.take(3)
+                    mine.forEach { c ->
+                        val r = runCatching { c.streamId?.let { xt.shortEpg(src, it, 8) }.orEmpty() }
+                        val got = r.getOrNull()
+                        sb.append("  get_short_epg « ${c.name} » : " + (got?.let { l -> if (l.isEmpty()) "0 programme" else "${l.size} programmes (${fmt.format(java.util.Date(l.first().start))} → ${fmt.format(java.util.Date(l.last().stop))})" } ?: ("ERREUR " + r.exceptionOrNull()?.let { Http.describe(it) })) + "\n")
                     }
-                    continue
                 }
+                val list = windowed
+                if (list.isEmpty()) continue
                 // Le cache mémoire/disque est rafraîchi avec ce téléchargement (pas de 2e téléchargement).
                 runCatching { xmltv(url, force = true) }
             } finally { tmp.delete() }

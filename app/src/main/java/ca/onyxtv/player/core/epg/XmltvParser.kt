@@ -19,6 +19,12 @@ object XmltvParser {
     @Volatile var lastProgrammeTags: Int = 0
     @Volatile var lastDropped: Int = 0
     @Volatile var lastFirstStartRaw: String? = null
+    @Volatile var lastLastStartRaw: String? = null
+    @Volatile var lastUnparsable: Int = 0
+    @Volatile var lastTooOld: Int = 0
+    @Volatile var lastTooFar: Int = 0
+    @Volatile var lastMinStart: Long = Long.MAX_VALUE
+    @Volatile var lastMaxStop: Long = 0L
 
 
     private val TIME_FMT = SimpleDateFormat("yyyyMMddHHmmss Z", Locale.US)
@@ -40,7 +46,8 @@ object XmltvParser {
         parser.setFeature(XmlPullParser.FEATURE_PROCESS_NAMESPACES, false)
         parser.setInput(src, null)
 
-        lastError = null; lastProgrammeTags = 0; lastDropped = 0; lastFirstStartRaw = null
+        lastError = null; lastProgrammeTags = 0; lastDropped = 0; lastFirstStartRaw = null; lastLastStartRaw = null
+        lastUnparsable = 0; lastTooOld = 0; lastTooFar = 0; lastMinStart = Long.MAX_VALUE; lastMaxStop = 0L
         var event = parser.eventType
         var channel: String? = null
         var start = 0L
@@ -60,6 +67,7 @@ object XmltvParser {
                         lastProgrammeTags++
                         channel = parser.getAttributeValue(null, "channel")
                         if (lastFirstStartRaw == null) lastFirstStartRaw = parser.getAttributeValue(null, "start")
+                        lastLastStartRaw = parser.getAttributeValue(null, "start")
                         start = parseTime(parser.getAttributeValue(null, "start"))
                         stop = parseTime(parser.getAttributeValue(null, "stop"))
                         title = null; desc = null
@@ -81,7 +89,12 @@ object XmltvParser {
                     "title", "desc" -> current = null
                     "programme" -> {
                         val ch = channel
-                        if (ch == null || start <= 0L || start > toMs || (stop > start && stop < fromMs)) lastDropped++
+                        if (start > 0L) { if (start < lastMinStart) lastMinStart = start; if (stop > lastMaxStop) lastMaxStop = stop }
+                        when {
+                            ch == null || start <= 0L -> { lastDropped++; lastUnparsable++ }
+                            start > toMs -> { lastDropped++; lastTooFar++ }
+                            stop > start && stop < fromMs -> { lastDropped++; lastTooOld++ }
+                        }
                         if (ch != null && start > 0 && start <= toMs) {
                             if (stop > start) {
                                 if (stop >= fromMs) out += EpgProgram(channelId = ch, title = title ?: "Programme", description = desc, start = start, stop = stop)
