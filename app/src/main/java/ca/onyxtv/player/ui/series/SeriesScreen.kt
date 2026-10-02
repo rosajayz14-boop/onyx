@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
@@ -134,7 +135,9 @@ private fun SeriesContent(
         }
     }
 
-    var season by remember(detail) { mutableIntStateOf(nextUp?.season ?: seasons.first()) }
+    var season by remember(detail) {
+        mutableIntStateOf((nextUp?.season ?: seasons.first()).let { if (detail.seasons[it].isNullOrEmpty()) seasons.first() else it })
+    }
     val playFocus = remember { androidx.compose.ui.focus.FocusRequester() }
     var playFocused by remember { mutableStateOf(false) }
     // Bande-annonce : YouTube lu dans l'app ; lien direct (mp4…) lu par ONYX.
@@ -192,7 +195,7 @@ private fun SeriesContent(
 
         Spacer(Modifier.width(28.dp))
 
-        Column(Modifier.fillMaxHeight()) {
+        Column(Modifier.weight(1f).fillMaxHeight()) {
             Text(detail.name, style = MaterialTheme.typography.headlineLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
             Text(
                 listOfNotNull(
@@ -216,13 +219,19 @@ private fun SeriesContent(
                 )
             }
 
+            // Titres d'épisodes des fournisseurs : « FR - Série (2022) (JP) - S01E08 - Titre… » ;
+            // on garde la fin utile pour que le bouton reste court et laisse la place aux autres.
+            fun shortTitle(t: String): String = t.substringAfterLast(" - ").trim().ifBlank { t }.take(40)
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(vertical = 14.dp)) {
                 nextUp?.let { ep ->
-                    Button(onClick = { onPlay(target(ep)) }, modifier = Modifier.focusRequester(playFocus).onFocusChanged { playFocused = it.isFocused }) {
+                    Button(
+                        onClick = { onPlay(target(ep)) },
+                        modifier = Modifier.weight(1f, fill = false).focusRequester(playFocus).onFocusChanged { playFocused = it.isFocused },
+                    ) {
                         Text(
                             when (nextUpMode) {
-                                "resume" -> "▶ Reprendre S${ep.season}E${ep.number} · ${ep.title} (${((progressById[ep.id] ?: 0f) * 100).toInt()} %)"
-                                "next" -> "▶ Épisode suivant S${ep.season}E${ep.number} · ${ep.title}"
+                                "resume" -> "▶ Reprendre S${ep.season}E${ep.number} · ${shortTitle(ep.title)} (${((progressById[ep.id] ?: 0f) * 100).toInt()} %)"
+                                "next" -> "▶ Épisode suivant S${ep.season}E${ep.number} · ${shortTitle(ep.title)}"
                                 else -> "▶ Commencer S${ep.season}E${ep.number}"
                             },
                             maxLines = 1, overflow = TextOverflow.Ellipsis,
@@ -235,18 +244,19 @@ private fun SeriesContent(
                 }
             }
 
-            if (seasons.size > 1) {
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(bottom = 10.dp)) {
-                    items(seasons, key = { it }) { s ->
-                        Button(onClick = { season = s }) {
-                            Text(if (s == season) "● Saison $s" else "Saison $s")
-                        }
+            // Saisons : toujours visibles (même une seule), puis la liste des épisodes de la saison
+            // choisie. La liste prend TOUTE la hauteur restante (weight) : elle ne peut pas disparaître.
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(bottom = 10.dp)) {
+                items(seasons, key = { it }) { s ->
+                    Button(onClick = { season = s }) {
+                        Text(if (s == season) "● Saison $s (${detail.seasons[s]?.size ?: 0})" else "Saison $s (${detail.seasons[s]?.size ?: 0})")
                     }
                 }
             }
 
-            LazyColumn(Modifier.fillMaxSize()) {
-                items(episodes, key = { it.id }) { ep ->
+            LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
+                if (episodes.isEmpty()) item { Text("Aucun épisode dans cette saison.", color = OnyxMuted, modifier = Modifier.padding(12.dp)) }
+                itemsIndexed(episodes, key = { i, ep -> "$i:${ep.id}" }) { _, ep ->
                     val progress = progressById[ep.id]
                     ListItem(
                         selected = false,
