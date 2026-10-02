@@ -482,6 +482,16 @@ class OnyxViewModel(app: Application) : AndroidViewModel(app) {
     fun clearSourceStatus() { _sourceStatus.value = null }
 
     /** Format des flux live d'un compte Xtream : "ts" (MPEG-TS) ou "m3u8" (HLS). */
+    /** Guide XMLTV supplémentaire d'un compte Xtream (vide = aucun), puis rechargement du guide. */
+    fun setExtraEpgUrl(sourceId: String, url: String) {
+        viewModelScope.launch {
+            val clean = url.trim().takeIf { it.startsWith("http", true) }
+            store.update(sourceId) { if (it is PlaylistSource.Xtream) it.copy(extraEpgUrl = clean) else it }
+            _sourceStatus.value = if (clean == null) "Guide supplémentaire retiré." else "Guide supplémentaire enregistré — téléchargement…"
+            refreshEpg()
+        }
+    }
+
     fun setLiveExtension(sourceId: String, ext: String) {
         viewModelScope.launch {
             store.update(sourceId) { if (it is PlaylistSource.Xtream) it.copy(liveExtension = ext) else it }

@@ -33,5 +33,8 @@ sealed interface PlaylistSource {
         val password: String,
         /** Extension de flux live : "ts" (MPEG-TS) ou "m3u8" (HLS). */
         val liveExtension: String = "ts",
+        /** Guide XMLTV supplémentaire (URL publique) fusionné avec celui du panneau — utile
+         *  quand le fournisseur livre un guide périmé ou incomplet. */
+        val extraEpgUrl: String? = null,
     ) : PlaylistSource
 }

@@ -122,6 +122,17 @@ fun SettingsScreen(vm: OnyxViewModel) {
                         Button(onClick = { vm.setLiveExtension(s.id, if (hls) "ts" else "m3u8") }) {
                             Text("Flux live : ${if (hls) "HLS (m3u8)" else "MPEG-TS"} — basculer si certaines chaînes ne se lisent pas")
                         }
+                        // Guide supplémentaire : quand le guide du fournisseur est périmé ou incomplet.
+                        var extra by remember(s.id, s.extraEpgUrl) { mutableStateOf(s.extraEpgUrl ?: "") }
+                        Text(
+                            "Guide supplémentaire (URL XMLTV publique, ex. un guide « epg.pw » ou « iptv-org » pour vos chaînes) : fusionné avec le guide du fournisseur, le plus à jour des deux est affiché.",
+                            color = OnyxMuted, style = MaterialTheme.typography.bodyMedium,
+                        )
+                        Field("URL du guide supplémentaire (XMLTV, .xml ou .xml.gz)", extra, KeyboardType.Uri) { extra = it }
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Button(onClick = { vm.setExtraEpgUrl(s.id, extra) }) { Text("Enregistrer le guide supplémentaire") }
+                            if (!s.extraEpgUrl.isNullOrBlank()) Button(onClick = { extra = ""; vm.setExtraEpgUrl(s.id, "") }) { Text("Retirer") }
+                        }
                     }
                 }
             }
