@@ -50,6 +50,7 @@ import ca.onyxtv.player.ui.movie.youtubeId
 import ca.onyxtv.player.ui.theme.OnyxBg
 import ca.onyxtv.player.ui.theme.OnyxCyan
 import ca.onyxtv.player.ui.theme.OnyxMuted
+import ca.onyxtv.player.ui.theme.OnyxText
 import ca.onyxtv.player.viewmodel.OnyxViewModel
 
 /** Fiche série : affiche, résumé, saisons et épisodes (avec reprise). */
@@ -249,6 +250,7 @@ private fun SeriesContent(
                     val progress = progressById[ep.id]
                     ListItem(
                         selected = false,
+                        colors = ca.onyxtv.player.ui.components.onyxListColors(),
                         onClick = { onPlay(target(ep)) },
                         onLongClick = {
                             val seen = ep.id in finishedIds
@@ -264,7 +266,7 @@ private fun SeriesContent(
                             )
                         },
                         headlineContent = {
-                            Text("E${ep.number} · ${ep.title}", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text("E${ep.number} · ${ep.title}", color = OnyxText, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         },
                         supportingContent = {
                             val meta = listOfNotNull(

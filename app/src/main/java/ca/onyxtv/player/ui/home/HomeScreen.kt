@@ -230,15 +230,17 @@ fun HomeScreen(
                             initials = (series?.name ?: r.title).take(1).uppercase(),
                             progress = if (r.resumable) r.progress else null,
                             badge = "SÉRIE",
-                            onClick = { onPlay(vm.freshTarget(r)) },
+                            // Ouvre la FICHE de la série (accès à toutes les saisons / épisodes) ;
+                            // la reprise directe de l'épisode reste dans le menu (appui long).
+                            onClick = { if (series != null) openVod(series) else onPlay(vm.freshTarget(r)) },
                             onLongClick = {
                                 showMenu(
                                     ca.onyxtv.player.ui.components.ContextMenuRequest(
                                         title = series?.name ?: r.title, subtitle = r.title,
                                         actions = buildList {
                                             add(MenuAction(if (r.resumable) "▶ Reprendre l'épisode" else "▶ Lire l'épisode") { onPlay(vm.freshTarget(r)) })
-                                            if (series != null) add(MenuAction("Ouvrir la série") { openVod(series) })
-                                            add(MenuAction("✕ Retirer") { vm.removeRecent(r.id) })
+                                            if (series != null) add(MenuAction("Ouvrir la série (saisons)") { openVod(series) })
+                                            add(MenuAction("✕ Retirer de l'historique") { vm.removeRecent(r.id) })
                                         },
                                     )
                                 )

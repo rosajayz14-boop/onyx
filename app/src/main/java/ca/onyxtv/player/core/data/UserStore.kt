@@ -241,5 +241,10 @@ class UserStore(private val context: Context) {
         }
     }
 
+    /** Vide tout l'historique (récents / reprises) du profil actif. */
+    suspend fun clearRecents() {
+        context.userDataStore.edit { p -> p[rec(p)] = "[]" }
+    }
+
     private companion object { const val MAX_RECENTS_LIVE = 20; const val MAX_RECENTS_VOD = 60 }
 }

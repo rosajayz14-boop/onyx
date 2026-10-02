@@ -50,6 +50,7 @@ import ca.onyxtv.player.ui.components.channelMenu
 import ca.onyxtv.player.ui.theme.OnyxCyan
 import ca.onyxtv.player.ui.theme.OnyxLive
 import ca.onyxtv.player.ui.theme.OnyxMuted
+import ca.onyxtv.player.ui.theme.OnyxText
 import ca.onyxtv.player.ui.theme.OnyxSurfaceHi
 import ca.onyxtv.player.viewmodel.OnyxViewModel
 import ca.onyxtv.player.viewmodel.hiddenGroups
@@ -152,6 +153,7 @@ fun LiveTvScreen(vm: OnyxViewModel, onPlay: (PlayTarget) -> Unit) {
                     items(filtered, key = { it.id }) { c ->
                         ListItem(
                             selected = c.id == selected?.id,
+                            colors = ca.onyxtv.player.ui.components.onyxListColors(),
                             onClick = { onPlay(c.toPlayTarget()) },
                             onLongClick = {
                                 showMenu(channelMenu(c, c.id in favorites, play = { onPlay(c.toPlayTarget()) }, toggleFavorite = { vm.toggleFavorite(c.id) },
@@ -167,7 +169,7 @@ fun LiveTvScreen(vm: OnyxViewModel, onPlay: (PlayTarget) -> Unit) {
                                 }
                             },
                             headlineContent = {
-                                Text((c.number?.let { "$it · " } ?: "") + c.name, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text((c.number?.let { "$it · " } ?: "") + c.name, color = OnyxText, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             },
                             supportingContent = { NowNextLine(vm, c, state.epgVersion) },
                             trailingContent = {
@@ -219,8 +221,9 @@ fun LiveTvScreen(vm: OnyxViewModel, onPlay: (PlayTarget) -> Unit) {
 private fun GroupItem(name: String, count: Int, selected: Boolean, onClick: () -> Unit) {
     ListItem(
         selected = selected,
+        colors = ca.onyxtv.player.ui.components.onyxListColors(),
         onClick = onClick,
-        headlineContent = { Text(name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+        headlineContent = { Text(name, color = OnyxText, maxLines = 1, overflow = TextOverflow.Ellipsis) },
         trailingContent = { Text(count.toString(), color = OnyxMuted, style = MaterialTheme.typography.bodyMedium) },
         modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
     )

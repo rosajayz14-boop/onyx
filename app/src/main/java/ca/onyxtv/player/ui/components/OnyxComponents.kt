@@ -26,6 +26,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.tv.material3.Card
+import androidx.tv.material3.CardDefaults
+import androidx.tv.material3.ListItemDefaults
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -39,6 +41,8 @@ import ca.onyxtv.player.ui.theme.OnyxCyan
 import ca.onyxtv.player.ui.theme.OnyxLive
 import ca.onyxtv.player.ui.theme.OnyxMuted
 import ca.onyxtv.player.ui.theme.OnyxSurface
+import ca.onyxtv.player.ui.theme.OnyxSurfaceHi
+import ca.onyxtv.player.ui.theme.OnyxText
 import ca.onyxtv.player.ui.theme.OnyxViolet
 import androidx.compose.ui.platform.LocalContext
 import coil.compose.AsyncImage
@@ -117,6 +121,16 @@ fun Thumbnail(
     }
 }
 
+/** Couleurs de ListItem ONYX : texte clair en permanence, fond sombre au focus (bordure cyan),
+ *  jamais de texte noir sur fond clair. */
+@Composable
+fun onyxListColors() = ListItemDefaults.colors(
+    containerColor = androidx.compose.ui.graphics.Color.Transparent, contentColor = OnyxText,
+    focusedContainerColor = OnyxSurfaceHi, focusedContentColor = OnyxText,
+    pressedContainerColor = OnyxSurfaceHi, pressedContentColor = OnyxText,
+    selectedContainerColor = OnyxSurfaceHi, selectedContentColor = OnyxText,
+)
+
 /** Carte de contenu générique (chaîne, film, série…). */
 @Composable
 fun MediaCard(
@@ -136,7 +150,18 @@ fun MediaCard(
     /** Appui long sur OK (menu contextuel : favoris, retirer des récents…). */
     onLongClick: (() -> Unit)? = null,
 ) {
-    Card(onClick = onClick, onLongClick = onLongClick, modifier = modifier.width(width)) {
+    Card(
+        onClick = onClick,
+        onLongClick = onLongClick,
+        // Fond toujours sombre, texte toujours clair (au repos comme au focus) : le focus se voit
+        // à l'agrandissement et à la bordure cyan, jamais par un texte noir sur fond clair.
+        colors = CardDefaults.colors(
+            containerColor = OnyxSurfaceHi, contentColor = OnyxText,
+            focusedContainerColor = OnyxSurfaceHi, focusedContentColor = OnyxText,
+            pressedContainerColor = OnyxSurfaceHi, pressedContentColor = OnyxText,
+        ),
+        modifier = modifier.width(width),
+    ) {
         Column {
             Box(
                 Modifier
@@ -178,6 +203,7 @@ fun MediaCard(
                 Text(
                     text = title,
                     style = MaterialTheme.typography.titleMedium,
+                    color = OnyxText,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )

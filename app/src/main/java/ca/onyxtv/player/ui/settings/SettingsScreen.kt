@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -23,6 +24,12 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import ca.onyxtv.player.ui.theme.OnyxText
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.foundation.focusable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.foundation.focusGroup
@@ -143,6 +150,7 @@ fun SettingsScreen(vm: OnyxViewModel) {
 
         // ---- Lecture ----
         item { PlaybackCard(vm) }
+        item { HistoryCard(vm) }
         item { HiddenCard(vm, state) }
         item { RemindersCard(vm) }
 
@@ -199,6 +207,60 @@ fun SettingsScreen(vm: OnyxViewModel) {
             )
         }
     }
+
+    // Fenêtre DÉFILABLE du résultat du test du guide (texte long illisible en ligne sur une TV).
+    val epgTestResult by vm.epgTest.collectAsStateWithLifecycle()
+    epgTestResult?.let { text ->
+        val scroll = rememberScrollState()
+        val focus = remember { FocusRequester() }
+        LaunchedEffect(Unit) { kotlinx.coroutines.delay(80); runCatching { focus.requestFocus() } }
+        BackHandler(enabled = true) { vm.clearEpgTest() }
+        androidx.compose.foundation.layout.Box(
+            Modifier.fillMaxSize().background(Color(0xF2050509)).padding(28.dp),
+        ) {
+            Column(Modifier.fillMaxSize()) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("Résultat du test du guide", style = MaterialTheme.typography.headlineMedium, color = OnyxText)
+                    Button(onClick = { vm.clearEpgTest() }) { Text("✕ Fermer") }
+                    Text("▲ ▼ pour défiler · Retour pour fermer", color = OnyxMuted, style = MaterialTheme.typography.bodyMedium)
+                }
+                Spacer(Modifier.height(12.dp))
+                Column(
+                    Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(OnyxSurface)
+                        .focusRequester(focus)
+                        .focusable()
+                        .verticalScroll(scroll)
+                        .padding(18.dp),
+                ) {
+                    Text(text, color = OnyxText, style = MaterialTheme.typography.bodyLarge)
+                }
+            }
+        }
+    }
+    }
+}
+
+/** Historique de lecture : suppression complète (à l'unité : appui long sur « Reprendre »/« Continuer »). */
+@Composable
+private fun HistoryCard(vm: OnyxViewModel) {
+    val recents by vm.recents.collectAsStateWithLifecycle()
+    var confirm by remember { mutableStateOf(false) }
+    FormCard("Historique de lecture") {
+        Text(
+            if (recents.isEmpty()) "Aucun élément dans l'historique."
+            else "${recents.size} élément(s). Pour en retirer un seul : appui long sur sa vignette dans « Reprendre » ou « Continuer la série ».",
+            color = OnyxMuted, style = MaterialTheme.typography.bodyMedium,
+        )
+        if (recents.isNotEmpty()) {
+            Spacer(Modifier.height(8.dp))
+            Button(onClick = { if (confirm) { vm.clearRecents(); confirm = false } else confirm = true }) {
+                Text(if (confirm) "Confirmer la suppression de tout l'historique ? (OK)" else "🗑 Supprimer tout l'historique")
+            }
+        }
     }
 }
 
@@ -394,7 +456,7 @@ private fun UpdateCard(vm: OnyxViewModel, state: OnyxUiState) {
         epgNote?.let { Text(it, color = OnyxCyan, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 8.dp)) }
         val epgTest by vm.epgTest.collectAsStateWithLifecycle()
         epgTest?.let {
-            Text(it, color = OnyxMuted, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 8.dp))
+            Text("Résultat du test prêt — voir la fenêtre.", color = OnyxCyan, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 8.dp))
         }
         Text(
             "Liste de lecture ET guide TV sont mis à jour automatiquement une fois par jour, en arrière-plan, et à l'ouverture si les données datent de plus de 24 h.",

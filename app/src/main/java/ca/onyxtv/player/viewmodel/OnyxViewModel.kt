@@ -432,6 +432,7 @@ class OnyxViewModel(app: Application) : AndroidViewModel(app) {
     private val _epgTest = MutableStateFlow<String?>(null)
     /** Résultat du test du guide (Réglages). */
     val epgTest: StateFlow<String?> = _epgTest.asStateFlow()
+    fun clearEpgTest() { _epgTest.value = null }
 
     fun testEpg() {
         if (_epgTest.value == "Test du guide en cours… (téléchargement complet, patientez)") return
@@ -625,6 +626,9 @@ class OnyxViewModel(app: Application) : AndroidViewModel(app) {
     fun removeRecent(id: String) {
         viewModelScope.launch { userStore.removeRecent(id) }
     }
+
+    /** Supprime tout l'historique de lecture (récents / reprises). */
+    fun clearRecents() { viewModelScope.launch { userStore.clearRecents() } }
 
     /** « Marquer comme vu / non vu » un épisode (menu appui long de la fiche série). */
     fun markWatched(ep: ca.onyxtv.player.core.model.Episode, series: VodItem, watched: Boolean) {
