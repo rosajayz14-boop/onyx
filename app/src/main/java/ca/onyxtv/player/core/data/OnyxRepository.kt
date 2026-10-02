@@ -611,7 +611,10 @@ class OnyxRepository(
                     if (fromDisk != null && (coverageEnd(fromDisk) >= now || now - disk.lastModified() < STALE_RETRY_MS)) {
                         runCatching {
                             val nf = epgNamesFile(url)
-                            if (nf != null && nf.exists()) synchronized(namesByUrl) { namesByUrl[url] = withContext(Dispatchers.IO) { epgJson.decodeFromString(epgNamesSer, nf.readText()) } }
+                            if (nf != null && nf.exists()) {
+                                val names = withContext(Dispatchers.IO) { epgJson.decodeFromString(epgNamesSer, nf.readText()) }
+                                synchronized(namesByUrl) { namesByUrl[url] = names }
+                            }
                         }
                         synchronized(xmltvByUrl) { xmltvByUrl[url] = Cached(disk.lastModified(), fromDisk) }
                         return@withLock fromDisk
