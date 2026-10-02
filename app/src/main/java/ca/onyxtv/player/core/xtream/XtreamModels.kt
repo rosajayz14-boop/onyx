@@ -27,6 +27,16 @@ object LenientInt : KSerializer<Int?> {
     override fun serialize(encoder: Encoder, value: Int?) { if (value == null) encoder.encodeNull() else encoder.encodeInt(value) }
 }
 
+/** Texte « tolérant » : `port`, `timestamp_now`… arrivent en nombre ou en texte selon le panneau. */
+object LenientStr : KSerializer<String?> {
+    override val descriptor: SerialDescriptor = PrimitiveSerialDescriptor("LenientStr", PrimitiveKind.STRING).nullable
+    override fun deserialize(decoder: Decoder): String? {
+        val el = (decoder as? JsonDecoder)?.decodeJsonElement() ?: return runCatching { decoder.decodeString() }.getOrNull()
+        return (el as? JsonPrimitive)?.content?.trim()?.takeIf { it.isNotEmpty() && it != "null" }
+    }
+    override fun serialize(encoder: Encoder, value: String?) { if (value == null) encoder.encodeNull() else encoder.encodeString(value) }
+}
+
 /**
  * Modèles JSON des réponses Xtream Codes (player_api.php).
  * Tous les champs inconnus sont ignorés (Json { ignoreUnknownKeys = true }).
@@ -39,6 +49,18 @@ object LenientInt : KSerializer<Int?> {
 @Serializable
 data class XtAuthResponse(
     @SerialName("user_info") val userInfo: XtUserInfo? = null,
+    @SerialName("server_info") val serverInfo: XtServerInfo? = null,
+)
+
+/** Serveur RÉEL annoncé par le panneau : l'adresse saisie est parfois un relais (VPN, CDN) au guide figé. */
+@Serializable
+data class XtServerInfo(
+    @Serializable(with = LenientStr::class) @SerialName("url") val url: String? = null,
+    @Serializable(with = LenientStr::class) @SerialName("port") val port: String? = null,
+    @Serializable(with = LenientStr::class) @SerialName("https_port") val httpsPort: String? = null,
+    @Serializable(with = LenientStr::class) @SerialName("server_protocol") val protocol: String? = null,
+    @Serializable(with = LenientStr::class) @SerialName("timezone") val timezone: String? = null,
+    @Serializable(with = LenientStr::class) @SerialName("timestamp_now") val timestampNow: String? = null,
 )
 
 @Serializable

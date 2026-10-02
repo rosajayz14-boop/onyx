@@ -187,12 +187,29 @@ class OnyxRepository(
         return found
     }
 
+    /**
+     * Quand l'export xmltv de l'adresse saisie est périmé, on essaie le même export sur le
+     * serveur RÉEL annoncé par le panneau (server_info.url:port) : l'adresse saisie est parfois
+     * un relais (VPN, CDN) dont le guide n'est plus régénéré, alors que le panneau d'origine
+     * l'est — c'est ce que voient les autres lecteurs configurés avec l'adresse d'origine.
+     * Si ce guide va plus loin dans le temps, il est enregistré comme guide supplémentaire.
+     */
+    suspend fun discoverRealServerEpg(src: PlaylistSource.Xtream, primaryEnd: Long): String? {
+        if (!src.extraEpgUrl.isNullOrBlank()) return null
+        val base = xt.realBase(src, xt.serverInfo(src)) ?: return null
+        val alt = xt.xmltvUrlAt(src, base)
+        val list = runCatching { xmltv(alt) }.getOrDefault(emptyList())
+        if (list.isEmpty() || coverageEnd(list) <= primaryEnd) return null
+        runCatching { store.update(src.id) { s -> (s as? PlaylistSource.Xtream)?.copy(extraEpgUrl = alt) ?: s } }
+        return alt
+    }
+
     /** Précharge le guide des comptes (appelé après le chargement du catalogue) : le Guide TV s'ouvre déjà rempli. */
     suspend fun prefetchEpg(channels: List<Channel> = emptyList()) {
         store.sources.first().filterIsInstance<PlaylistSource.Xtream>().forEach { runCatching { discoverTvgUrl(it) } }
         var programmes = 0; var guideChannels = 0; var matched = 0; var checked = 0; var coverageEnd = 0L
         val details = ArrayList<String>()
-        epgUrls().forEach { url ->
+        suspend fun scan(url: String) {
             val idx = runCatching { xmltvIndex(url) }.getOrElse { details += "téléchargement : ${Http.describe(it)}"; emptyMap() }
             // Fin de couverture RÉELLE : on ignore les « programmes » de plusieurs jours (remplissage).
             idx.values.forEach { l -> l.forEach { pr -> if (pr.stop - pr.start <= 12 * 3_600_000L && pr.stop > coverageEnd) coverageEnd = pr.stop } }
@@ -202,6 +219,16 @@ class OnyxRepository(
             val sample = channels.take(300)
             checked += sample.size
             matched += sample.count { matchInIndex(idx, it.epgChannelId, it.name).isNotEmpty() }
+        }
+        epgUrls().forEach { scan(it) }
+        // Guide périmé (ne couvre plus l'heure actuelle) : essai sur le serveur réel du panneau.
+        if (coverageEnd < System.currentTimeMillis()) {
+            store.sources.first().filterIsInstance<PlaylistSource.Xtream>().forEach { src ->
+                val found = runCatching { discoverRealServerEpg(src, coverageEnd) }.getOrNull() ?: return@forEach
+                details += "guide repris sur le serveur réel du panneau (${maskUrl(found).substringBefore("/xmltv")})"
+                matched = 0; checked = 0; programmes = 0; guideChannels = 0
+                scan(xt.xmltvUrl(src)); scan(found)
+            }
         }
         if (epgUrls().isEmpty()) details += "aucune adresse de guide (compte Xtream absent, liste M3U sans url-tvg)"
         // La base EPG du panneau répond-elle pour l'avenir ? (une chaîne avec identifiant EPG)
@@ -252,6 +279,37 @@ class OnyxRepository(
         sources.filterIsInstance<PlaylistSource.Xtream>().forEach { src ->
             val tvg = runCatching { discoverTvgUrl(src) }.getOrNull()
             sb.append("■ ${src.label} · en-tête du M3U (get.php) : url-tvg = ${tvg?.let { maskUrl(it) } ?: "absent"}\n")
+            // Serveur réel annoncé par le panneau (server_info) : horloge, fuseau, et export xmltv à CETTE adresse.
+            val info = runCatching { xt.serverInfo(src) }.getOrNull()
+            if (info == null) sb.append("  server_info : absent de la réponse du panneau\n")
+            else {
+                val srvNow = info.timestampNow?.toLongOrNull()?.let { if (it > 100_000_000_000L) it else it * 1000 }
+                val drift = srvNow?.let { (it - System.currentTimeMillis()) / 60_000L }
+                sb.append("  server_info : ${info.protocol ?: "http"}://${info.url ?: "?"}:${info.port ?: "?"} · fuseau ${info.timezone ?: "?"}" +
+                    (drift?.let { " · horloge serveur − appareil = $it min" + (if (kotlin.math.abs(it) > 10) " \u26a0 ÉCART D'HORLOGE" else "") } ?: "") + "\n")
+                val rb = xt.realBase(src, info)
+                if (rb == null) sb.append("  Serveur réel = adresse saisie : pas d'autre export à essayer.\n")
+                else {
+                    val alt = xt.xmltvUrlAt(src, rb)
+                    val pr = ca.onyxtv.player.core.net.StreamProbe.probe(alt)
+                    sb.append("  xmltv.php sur le serveur réel ($rb) : ${pr?.let { "HTTP ${it.code} ${it.length?.let { l -> ca.onyxtv.player.core.net.StreamProbe.fmtSize(l) } ?: ""}" } ?: "injoignable"}\n")
+                    if (pr != null && pr.code in 200..299) {
+                        val f = java.io.File(Http.tempDir ?: java.io.File(System.getProperty("java.io.tmpdir")), "epg-alt-${System.nanoTime()}.xml")
+                        try {
+                            val dl = runCatching { Http.getToFile(alt, f) }
+                            if (dl.isFailure) sb.append("    téléchargement : ÉCHEC — ${dl.exceptionOrNull()?.let { Http.describe(it) }}\n")
+                            else {
+                                val l = f.inputStream().buffered().use { XmltvParser.parse(it, nowTop - 6 * 3_600_000L, nowTop + 48 * 3_600_000L) }
+                                val end = coverageEnd(l)
+                                sb.append("    ${ca.onyxtv.player.core.net.StreamProbe.fmtSize(f.length())} · ${XmltvParser.lastProgrammeTags} programmes · ${l.size} dans la fenêtre · dernier horodatage « ${XmltvParser.lastLastStartRaw} »\n")
+                                sb.append(if (end >= nowTop) "    \u2713 CE guide est à jour (couvre jusqu'au ${fmt.format(java.util.Date(end))}) : il sera utilisé automatiquement.\n"
+                                    else "    \u2717 périmé lui aussi.\n")
+                                if (end >= nowTop && src.extraEpgUrl.isNullOrBlank()) runCatching { store.update(src.id) { s -> (s as? PlaylistSource.Xtream)?.copy(extraEpgUrl = alt) ?: s } }
+                            }
+                        } finally { f.delete() }
+                    }
+                }
+            }
         }
         val sources2 = store.sources.first()   // relu : un url-tvg découvert a pu être enregistré
         data class Entry(val label: String, val url: String?, val src: PlaylistSource)
@@ -312,7 +370,7 @@ class OnyxRepository(
                 val err = XmltvParser.lastError
                 val firstStart = XmltvParser.lastFirstStartRaw
                 sb.append("  Balises <programme> lues : $tags · gardées (fenêtre −6 h / +48 h) : ${windowed.size} · écartées : ${XmltvParser.lastDropped}\n")
-                sb.append("  Écartées car : date illisible ${XmltvParser.lastUnparsable} · trop anciennes ${XmltvParser.lastTooOld} · trop lointaines ${XmltvParser.lastTooFar}\n")
+                sb.append("  Écartées car : date illisible ${XmltvParser.lastUnparsable} · trop anciennes ${XmltvParser.lastTooOld} · trop lointaines ${XmltvParser.lastTooFar} · remplissage sans titre ${XmltvParser.lastFiller}\n")
                 if (XmltvParser.lastMaxStop > 0L) sb.append("  Le fichier couvre du ${fmt.format(java.util.Date(XmltvParser.lastMinStart))} au ${fmt.format(java.util.Date(XmltvParser.lastMaxStop))} · maintenant : ${fmt.format(java.util.Date(nowMs))}\n")
                 if (firstStart != null) sb.append("  Premier horodatage brut : « $firstStart » · dernier : « ${XmltvParser.lastLastStartRaw} »\n")
                 if (err != null) sb.append("  Erreur du parseur : $err\n")

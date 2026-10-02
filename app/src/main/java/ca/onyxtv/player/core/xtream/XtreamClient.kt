@@ -90,6 +90,28 @@ class XtreamClient(
     suspend fun userInfo(src: PlaylistSource.Xtream): XtUserInfo? =
         runCatching { json.decodeFromString<XtAuthResponse>(Http.get(authUrl(src))).userInfo }.getOrNull()
 
+    suspend fun serverInfo(src: PlaylistSource.Xtream): XtServerInfo? =
+        runCatching { json.decodeFromString<XtAuthResponse>(Http.get(authUrl(src))).serverInfo }.getOrNull()
+
+    /**
+     * Base « réelle » du panneau d'après server_info (protocole://url:port), ou null si elle est
+     * absente ou identique à l'adresse saisie. Utile quand l'adresse saisie est un relais dont
+     * l'export xmltv.php n'est plus mis à jour.
+     */
+    fun realBase(src: PlaylistSource.Xtream, info: XtServerInfo?): String? {
+        val host = info?.url?.trim()?.trimEnd('/')?.takeIf { it.isNotBlank() } ?: return null
+        val https = info.protocol?.equals("https", true) == true
+        val port = (if (https) info.httpsPort ?: info.port else info.port)?.trim()?.takeIf { it.isNotBlank() }
+        val bare = host.replace(Regex("^https?://", RegexOption.IGNORE_CASE), "")
+        val defaultPort = (https && port == "443") || (!https && port == "80")
+        val b = (if (https) "https://" else "http://") + bare + (if (port != null && !defaultPort && !bare.contains(':')) ":$port" else "")
+        return b.takeIf { !it.equals(base(src), true) }
+    }
+
+    /** URL xmltv.php sur une autre base (serveur réel du panneau). */
+    fun xmltvUrlAt(src: PlaylistSource.Xtream, baseUrl: String): String =
+        "${baseUrl.trimEnd('/')}/xmltv.php?username=${enc(src.username)}&password=${enc(src.password)}"
+
     fun liveUrl(src: PlaylistSource.Xtream, streamId: Long): String =
         "${base(src)}/live/${enc(src.username)}/${enc(src.password)}/$streamId.${src.liveExtension}"
 

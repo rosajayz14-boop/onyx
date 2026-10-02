@@ -150,13 +150,16 @@ fun GuideScreen(vm: OnyxViewModel, onPlay: (PlayTarget) -> Unit) {
     Column(Modifier.fillMaxSize().padding(start = 24.dp, end = 24.dp, top = 20.dp, bottom = 12.dp)) {
         val epgStatus by vm.epgStatus.collectAsStateWithLifecycle()
         epgStatus?.let { st ->
-            val stale = st.coverageEnd in 1 until now && !st.tableWorks
+            // Périmé : le guide reçu ne couvre plus l'heure actuelle (coverageEnd = 0 quand il ne reste
+            // que du remplissage), et l'API par chaîne du panneau ne répond pas non plus.
+            val stale = st.programmes > 0 && st.coverageEnd < now && !st.tableWorks
             if ((st.matched == 0 && !st.tableWorks) || stale || prefs.diagnostics) {
                 val endTxt = java.text.SimpleDateFormat("EEE d MMM HH:mm", java.util.Locale.getDefault()).format(java.util.Date(st.coverageEnd))
                 Text(
                     when {
                         st.programmes == 0 -> "Guide vide : ${st.detail.ifBlank { "le serveur n'a renvoyé aucun programme" }} — Réglages → « Tester le guide » pour le détail."
-                        stale -> "L'export xmltv du fournisseur s'arrête le $endTxt et l'API par chaîne ne répond pas : guide périmé côté serveur. Réglages → « Tester le guide », ou ajoutez un guide supplémentaire sur votre compte."
+                        stale && st.coverageEnd > 0L -> "L'export xmltv du fournisseur s'arrête le $endTxt et l'API par chaîne ne répond pas : guide périmé côté serveur. Réglages → « Tester le guide », ou ajoutez un guide supplémentaire sur votre compte."
+                        stale -> "Le guide reçu du fournisseur ne contient aucune émission à venir (seulement du remplissage) : guide périmé côté serveur. Nouvel essai automatique toutes les 2 h — Réglages → « Tester le guide »."
                         else -> "Guide : ${st.programmes} programmes · ${st.guideChannels} chaînes · appariées ${st.matched}/${st.checked}" +
                             (if (st.matched == 0) " — aucune chaîne du compte ne correspond aux identifiants du guide (Réglages → « Tester le guide »)." else "")
                     },
@@ -370,19 +373,22 @@ private fun GuideRow(
         }
 
         // Ligne de programmes (défilement horizontal partagé) + ligne « maintenant »
-        Box(Modifier.weight(1f).fillMaxHeight().horizontalScroll(hScroll)) {
+        if (programs.isEmpty()) {
+            // Bloc FIXE (hors défilement) : un bloc de 3 h qui défilait laissait son texte
+            // hors écran et chaque ligne n'affichait plus que « …programme ».
+            Card(
+                onClick = { onOpen(null) },
+                colors = CardDefaults.colors(containerColor = OnyxSurface.copy(alpha = 0.6f)),
+                modifier = Modifier.weight(1f).fillMaxHeight().padding(end = 2.dp)
+                    .onFocusChanged { if (it.isFocused) onFocus(null) },
+            ) {
+                Box(Modifier.fillMaxSize().padding(horizontal = 12.dp), contentAlignment = Alignment.CenterStart) {
+                    Text("Aucune information de programme", style = MaterialTheme.typography.titleMedium, color = OnyxMuted, maxLines = 1)
+                }
+            }
+        } else Box(Modifier.weight(1f).fillMaxHeight().horizontalScroll(hScroll)) {
             Row(Modifier.fillMaxHeight()) {
-                if (programs.isEmpty()) {
-                    ProgramBlock(
-                        title = "Aucun programme",
-                        time = null,
-                        widthDp = minutesToDp(windowEnd.minus(windowStart) / MS_PER_MIN),
-                        live = false,
-                        past = false,
-                        onFocus = { onFocus(null) },
-                        onClick = { onOpen(null) },
-                    )
-                } else {
+                run {
                     var cursor = windowStart
                     programs.forEach { p ->
                         val start = maxOf(p.start, windowStart)

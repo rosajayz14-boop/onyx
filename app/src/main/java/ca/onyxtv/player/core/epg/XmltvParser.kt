@@ -23,6 +23,7 @@ object XmltvParser {
     @Volatile var lastUnparsable: Int = 0
     @Volatile var lastTooOld: Int = 0
     @Volatile var lastTooFar: Int = 0
+    @Volatile var lastFiller: Int = 0
     @Volatile var lastMinStart: Long = Long.MAX_VALUE
     @Volatile var lastMaxStop: Long = 0L
 
@@ -47,7 +48,7 @@ object XmltvParser {
         parser.setInput(src, null)
 
         lastError = null; lastProgrammeTags = 0; lastDropped = 0; lastFirstStartRaw = null; lastLastStartRaw = null
-        lastUnparsable = 0; lastTooOld = 0; lastTooFar = 0; lastMinStart = Long.MAX_VALUE; lastMaxStop = 0L
+        lastUnparsable = 0; lastTooOld = 0; lastTooFar = 0; lastFiller = 0; lastMinStart = Long.MAX_VALUE; lastMaxStop = 0L
         var event = parser.eventType
         var channel: String? = null
         var start = 0L
@@ -95,7 +96,12 @@ object XmltvParser {
                             start > toMs -> { lastDropped++; lastTooFar++ }
                             stop > start && stop < fromMs -> { lastDropped++; lastTooOld++ }
                         }
-                        if (ch != null && start > 0 && start <= toMs) {
+                        // « Programme » sans titre de plus de 12 h : remplissage du panneau, pas une émission.
+                        // Gardé dans le guide, il masquerait les vraies émissions d'un autre guide et
+                        // ferait croire à une chaîne « appariée ».
+                        val filler = title == null && stop > start && stop - start > 12 * 3_600_000L
+                        if (filler) { lastDropped++; lastFiller++ }
+                        if (ch != null && start > 0 && start <= toMs && !filler) {
                             if (stop > start) {
                                 if (stop >= fromMs) out += EpgProgram(channelId = ch, title = title ?: "Programme", description = desc, start = start, stop = stop)
                             } else if (start >= fromMs - 6 * 3_600_000L) {
