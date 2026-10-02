@@ -7,6 +7,9 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -839,7 +842,7 @@ fun PlayerScreen(
         if (listOpen && channelList != null) {
             val list = remember(listOpen) { channelList().filterNot { it.id in emptySet<String>() } }
             val currentIdx = list.indexOfFirst { it.id == currentTarget.id }.coerceAtLeast(0)
-            val listState = androidx.compose.foundation.lazy.rememberLazyListState(initialFirstVisibleItemIndex = (currentIdx - 3).coerceAtLeast(0))
+            val listState = rememberLazyListState(initialFirstVisibleItemIndex = (currentIdx - 3).coerceAtLeast(0))
             Column(
                 Modifier
                     .align(Alignment.CenterStart)
@@ -849,8 +852,8 @@ fun PlayerScreen(
                     .padding(horizontal = 16.dp, vertical = 20.dp),
             ) {
                 Text("Chaînes", style = MaterialTheme.typography.headlineMedium, color = Color.White, modifier = Modifier.padding(bottom = 10.dp))
-                androidx.compose.foundation.lazy.LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
-                    androidx.compose.foundation.lazy.items(list, key = { it.id }) { c ->
+                LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
+                    items(list, key = { it.id }) { c ->
                         androidx.tv.material3.ListItem(
                             selected = c.id == currentTarget.id,
                             onClick = { listOpen = false; currentOnSwitch(ca.onyxtv.player.ui.components.channelTarget(c)) },
