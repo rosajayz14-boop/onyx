@@ -240,6 +240,17 @@ class OnyxRepository(
                 val head = if (gz) "(gzip)" else String(headBytes, Charsets.UTF_8).replace(Regex("\\s+"), " ").take(220)
                 sb.append("  Fichier : ${ca.onyxtv.player.core.net.StreamProbe.fmtSize(size)} en ${secs} s${if (gz) " · compressé gzip" else ""}\n")
                 sb.append("  Début : ${head}\n")
+                // Fin du fichier : un export complet se termine par </tv>. Sinon le serveur a coupé
+                // la génération (temps limite PHP, etc.) et les jours suivants n'y sont jamais.
+                if (!gz) {
+                    val tail = java.io.RandomAccessFile(tmp, "r").use { raf ->
+                        val n = minOf(300L, raf.length()).toInt(); raf.seek(raf.length() - n)
+                        val b = ByteArray(n); raf.readFully(b); String(b, Charsets.UTF_8)
+                    }
+                    val complete = tail.contains("</tv>")
+                    sb.append("  Fin du fichier : " + (if (complete) "</tv> présent (export complet)" else "TRONQUÉ — pas de </tv> : « …${tail.takeLast(90).replace(Regex("\\s+"), " ")} »") + "\n")
+                    if (!complete) sb.append("  → Le serveur interrompt l'export avant la fin (limite de temps/taille côté panneau) : les jours à venir ne sont jamais envoyés.\n")
+                }
                 val nowMs = System.currentTimeMillis()
                 val windowed = runCatching { tmp.inputStream().buffered().use { XmltvParser.parse(it, nowMs - 6 * 3_600_000L, nowMs + 48 * 3_600_000L) } }.getOrDefault(emptyList())
                 val tags = XmltvParser.lastProgrammeTags
@@ -263,8 +274,23 @@ class OnyxRepository(
                     fun describe(r: Result<List<EpgProgram>>) = r.getOrNull()?.let { l ->
                         if (l.isEmpty()) "0 programme" else "${l.size} programmes (${fmt.format(java.util.Date(l.first().start))} → ${fmt.format(java.util.Date(l.last().stop))})"
                     } ?: ("ERREUR " + r.exceptionOrNull()?.let { Http.describe(it) })
+                    // Présence de ces identifiants dans le fichier brut (hors fenêtre) : comptage par balayage.
+                    val rawCounts = HashMap<String, Int>()
+                    if (!gz && mine.isNotEmpty()) runCatching {
+                        val needles = mine.map { it.epgChannelId!! to "channel=\"${it.epgChannelId}\"" }
+                        tmp.inputStream().buffered(256 * 1024).use { input ->
+                            val buf = ByteArray(256 * 1024); var carry = ""
+                            while (true) {
+                                val n = input.read(buf); if (n < 0) break
+                                val text = carry + String(buf, 0, n, Charsets.ISO_8859_1)
+                                needles.forEach { (id, nd) -> var i = text.indexOf(nd); while (i >= 0) { rawCounts[id] = (rawCounts[id] ?: 0) + 1; i = text.indexOf(nd, i + nd.length) } }
+                                carry = text.takeLast(200)
+                            }
+                        }
+                    }
                     mine.forEach { c ->
-                        sb.append("  « ${c.name} » [${c.epgChannelId}] · get_simple_data_table : ${describe(runCatching { xt.simpleDataTable(src, c.streamId!!) })}\n")
+                        sb.append("  « ${c.name} » [${c.epgChannelId}] · dans le fichier xmltv : ${rawCounts[c.epgChannelId] ?: 0} programme(s)\n")
+                        sb.append("      get_simple_data_table : ${describe(runCatching { xt.simpleDataTable(src, c.streamId!!) })}\n")
                         sb.append("      get_short_epg : ${describe(runCatching { xt.shortEpg(src, c.streamId!!, 8) })}\n")
                     }
                 }
