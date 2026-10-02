@@ -63,6 +63,12 @@ data class AppPrefs(
     val diagnostics: Boolean = false,
     /** Commit de la mise à jour écartée par « Plus tard » (l'écran plein ne revient pas pour ce build). */
     val dismissedUpdateCommit: String = "",
+    /** Aperçu vidéo de la chaîne sélectionnée dans TV en direct. */
+    val livePreview: Boolean = true,
+    /** Sous-titres : taille (×), fond sombre, couleur jaune. */
+    val subtitleScale: Float = 1f,
+    val subtitleBackground: Boolean = true,
+    val subtitleYellow: Boolean = false,
 )
 
 /**

@@ -16,6 +16,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -62,6 +63,7 @@ fun HomeScreen(
     val openVod: (VodItem) -> Unit = { v -> onOpenDetail(v) }
     val showMenu = LocalContextMenu.current
     val state by vm.state.collectAsStateWithLifecycle()
+    val sources by vm.sources.collectAsStateWithLifecycle()
     val favorites by vm.favorites.collectAsStateWithLifecycle()
     val recents by vm.recents.collectAsStateWithLifecycle()
     val parental by vm.parental.collectAsStateWithLifecycle()
@@ -166,6 +168,20 @@ fun HomeScreen(
                 )
             }
         }
+        val accounts by vm.accounts.collectAsStateWithLifecycle()
+        val expiring = accounts.entries.filter { (it.value.daysLeft ?: 99) <= 7 }
+        if (expiring.isNotEmpty()) {
+            item(key = "expiry") {
+                val labels = expiring.map { (id, a) -> (sources.firstOrNull { it.id == id }?.label ?: "Compte") to a }
+                Text(
+                    labels.joinToString("\n") { (l, a) ->
+                        val d = a.daysLeft ?: 0
+                        if (d < 0) "⚠ L'abonnement « $l » est expiré." else "⚠ L'abonnement « $l » expire dans $d jour${if (d > 1) "s" else ""} — pensez à le renouveler."
+                    },
+                    color = OnyxLive, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(bottom = 12.dp),
+                )
+            }
+        }
         if (state.sourceErrors.isNotEmpty() && !state.loading) {
             item(key = "error") {
                 Column(Modifier.padding(bottom = 12.dp)) {
@@ -253,9 +269,14 @@ fun HomeScreen(
             item(key = "live") {
                 Rail("En direct maintenant") {
                     items(channels.take(24), key = { it.id }) { c ->
+                        // Programme en cours (guide) sous le nom de la chaîne.
+                        val nowTitle by produceState<String?>(null, c.id, state.epgVersion) {
+                            val t = System.currentTimeMillis()
+                            value = runCatching { vm.epgFor(c) }.getOrNull()?.firstOrNull { it.isLiveAt(t) }?.title
+                        }
                         MediaCard(
                             title = (c.number?.let { "$it · " } ?: "") + c.name,
-                            subtitle = c.groupTitle,
+                            subtitle = nowTitle ?: c.groupTitle,
                             imageUrl = c.logoUrl,
                             seed = c.id,
                             initials = c.name.take(2).uppercase(),

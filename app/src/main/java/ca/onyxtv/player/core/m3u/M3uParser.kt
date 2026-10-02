@@ -25,6 +25,26 @@ object M3uParser {
         val number: Int?,
     )
 
+    /**
+     * Adresse du guide XMLTV « intégrée » à la liste : attribut `url-tvg` (ou `x-tvg-url`) de la
+     * ligne #EXTM3U. C'est ainsi que TiviMate/Smarters trouvent l'EPG d'un lien M3U sans réglage.
+     */
+    fun epgUrlFromHeader(content: String): String? {
+        val header = content.lineSequence().firstOrNull { it.trimStart().startsWith("#EXTM3U") } ?: return null
+        val attrs = ATTR.findAll(header).associate { it.groupValues[1].lowercase() to it.groupValues[2] }
+        return (attrs["url-tvg"] ?: attrs["x-tvg-url"] ?: attrs["tvg-url"])
+            ?.split(',')?.map { it.trim() }?.firstOrNull { it.startsWith("http", true) }
+    }
+
+    /** Lien M3U d'un panneau Xtream (get.php?username=…&password=…) → adresse xmltv.php du même compte. */
+    fun xmltvFromXtreamM3u(url: String): String? {
+        val m = Regex("^(https?://[^/]+)/get\\.php\\?(.*)$", RegexOption.IGNORE_CASE).find(url.trim()) ?: return null
+        val q = m.groupValues[2].split('&').mapNotNull { kv -> kv.split('=', limit = 2).takeIf { it.size == 2 }?.let { it[0].lowercase() to it[1] } }.toMap()
+        val u = q["username"] ?: return null
+        val pw = q["password"] ?: return null
+        return "${m.groupValues[1]}/xmltv.php?username=$u&password=$pw"
+    }
+
     fun parse(content: String, sourceId: String = ""): List<Channel> {
         val out = ArrayList<Channel>()
         var pending: Pending? = null

@@ -82,6 +82,10 @@ class XtreamClient(
         }
     }
 
+    /** Infos du compte (statut, expiration, connexions) ; null si la réponse n'est pas lisible. */
+    suspend fun userInfo(src: PlaylistSource.Xtream): XtUserInfo? =
+        runCatching { json.decodeFromString<XtAuthResponse>(Http.get(authUrl(src))).userInfo }.getOrNull()
+
     fun liveUrl(src: PlaylistSource.Xtream, streamId: Long): String =
         "${base(src)}/live/${enc(src.username)}/${enc(src.password)}/$streamId.${src.liveExtension}"
 

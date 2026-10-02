@@ -45,7 +45,15 @@ class OnyxRepository(
                 when (source) {
                     is PlaylistSource.M3u -> {
                         onProgress("Liste « ${source.label} »…")
-                        runCatching { M3uParser.parse(Http.get(source.url), source.id) }
+                        runCatching {
+                            val body = Http.get(source.url)
+                            // Guide « intégré » au lien : en-tête url-tvg, ou xmltv.php dérivé d'un lien get.php Xtream.
+                            if (source.epgUrl.isNullOrBlank()) {
+                                val found = M3uParser.epgUrlFromHeader(body) ?: M3uParser.xmltvFromXtreamM3u(source.url)
+                                if (found != null) runCatching { store.update(source.id) { s -> (s as? PlaylistSource.M3u)?.copy(epgUrl = found) ?: s } }
+                            }
+                            M3uParser.parse(body, source.id)
+                        }
                             .fold(
                                 onSuccess = { ch ->
                                     Triple(ch, emptyList<VodItem>(), SourceReport(source.id, source.label, "M3U", channels = ch.size, durationMs = System.currentTimeMillis() - t0))
@@ -88,6 +96,20 @@ class OnyxRepository(
             vod = results.flatMap { it.second },
             reports = results.map { it.third },
             updatedAt = System.currentTimeMillis(),
+        )
+    }
+
+    /** État d'un abonnement Xtream (carte de compte, alerte d'expiration). */
+    data class AccountInfo(val status: String, val expiresAt: Long?, val activeCons: Int?, val maxCons: Int?) {
+        val daysLeft: Long? get() = expiresAt?.let { ((it - System.currentTimeMillis()) / 86_400_000L) }
+    }
+
+    suspend fun accountInfo(src: PlaylistSource.Xtream): AccountInfo? = xt.userInfo(src)?.let {
+        AccountInfo(
+            status = it.status.ifBlank { if (it.auth == 1) "Active" else "?" },
+            expiresAt = it.expDate?.trim()?.toLongOrNull()?.let { s -> if (s > 100_000_000_000L) s else s * 1000 },
+            activeCons = it.activeCons?.trim()?.toIntOrNull(),
+            maxCons = it.maxConnections?.trim()?.toIntOrNull(),
         )
     }
 
@@ -145,9 +167,70 @@ class OnyxRepository(
         return emptyList()
     }
 
+    /** État du guide, calculé au préchargement : affiché dans le Guide TV quand il est vide. */
+    data class EpgStatus(val programmes: Int, val guideChannels: Int, val matched: Int, val checked: Int, val detail: String)
+    private val _epgStatus = kotlinx.coroutines.flow.MutableStateFlow<EpgStatus?>(null)
+    val epgStatus: kotlinx.coroutines.flow.StateFlow<EpgStatus?> = _epgStatus
+
     /** Précharge le guide des comptes (appelé après le chargement du catalogue) : le Guide TV s'ouvre déjà rempli. */
-    suspend fun prefetchEpg() {
-        epgUrls().forEach { url -> runCatching { xmltvIndex(url) } }
+    suspend fun prefetchEpg(channels: List<Channel> = emptyList()) {
+        var programmes = 0; var guideChannels = 0; var matched = 0; var checked = 0
+        val details = ArrayList<String>()
+        epgUrls().forEach { url ->
+            val idx = runCatching { xmltvIndex(url) }.getOrElse { details += "téléchargement : ${Http.describe(it)}"; emptyMap() }
+            programmes += idx.values.sumOf { it.size }
+            guideChannels += idx.size
+            if (idx.isEmpty()) details += "guide vide (${maskUrl(url)})"
+            val sample = channels.take(300)
+            checked += sample.size
+            matched += sample.count { matchInIndex(idx, it.epgChannelId, it.name).isNotEmpty() }
+        }
+        if (epgUrls().isEmpty()) details += "aucune adresse de guide (compte Xtream absent, liste M3U sans url-tvg)"
+        _epgStatus.value = EpgStatus(programmes, guideChannels, matched, checked, details.joinToString(" · "))
+    }
+
+    private fun maskUrl(url: String) = url.replace(Regex("(password=)[^&]+"), "$1•••")
+
+    /**
+     * Test complet du guide pour l'écran Réglages : adresse, réponse du serveur, programmes,
+     * chaînes du guide, appariement avec les chaînes du compte, exemples non appariés.
+     */
+    suspend fun epgReport(channels: List<Channel>): String = withContext(Dispatchers.Default) {
+        val sources = store.sources.first()
+        if (sources.isEmpty()) return@withContext "Aucune source configurée."
+        val sb = StringBuilder()
+        val fmt = java.text.SimpleDateFormat("dd/MM HH:mm", java.util.Locale.getDefault())
+        for (src in sources) {
+            val url = when (src) { is PlaylistSource.Xtream -> xt.xmltvUrl(src); is PlaylistSource.M3u -> src.epgUrl?.takeIf { it.isNotBlank() } }
+            sb.append("■ ${src.label}\n")
+            if (url == null) { sb.append("  Aucune adresse de guide : la liste M3U n'a pas d'en-tête url-tvg. Ajoutez l'URL XMLTV dans Réglages.\n"); continue }
+            sb.append("  Adresse : ${maskUrl(url)}\n")
+            val probe = ca.onyxtv.player.core.net.StreamProbe.probe(url)
+            sb.append("  Réponse serveur : ${probe?.let { "HTTP ${it.code} ${it.contentType?.substringBefore(';') ?: ""} ${it.length?.let { l -> ca.onyxtv.player.core.net.StreamProbe.fmtSize(l) } ?: ""}" } ?: "injoignable (délai dépassé ?)"}\n")
+            val t0 = System.currentTimeMillis()
+            val all = runCatching { xmltv(url, force = true) }
+            val list = all.getOrNull()
+            if (list == null) { sb.append("  Téléchargement/analyse : ÉCHEC — ${all.exceptionOrNull()?.let { Http.describe(it) }}\n"); continue }
+            val secs = (System.currentTimeMillis() - t0) / 1000
+            if (list.isEmpty()) {
+                sb.append("  Analyse : 0 programme en ${secs} s. Le fichier n'est pas un XMLTV lisible, ou ne couvre pas les 48 prochaines heures.\n")
+                continue
+            }
+            val ids = list.mapTo(HashSet()) { it.channelId }
+            sb.append("  Analyse : ${list.size} programmes · ${ids.size} chaînes · du ${fmt.format(java.util.Date(list.minOf { it.start }))} au ${fmt.format(java.util.Date(list.maxOf { it.stop }))} (${secs} s)\n")
+            val idx = xmltvIndex(url)
+            val prefix = if (src is PlaylistSource.Xtream) "xt:${src.id}:" else "m3u:${src.id}:"
+            val mine = channels.filter { it.id.startsWith(prefix) }
+            val unmatched = ArrayList<Channel>()
+            var matched = 0
+            mine.forEach { c -> if (matchInIndex(idx, c.epgChannelId, c.name).isNotEmpty()) matched++ else if (unmatched.size < 6) unmatched += c }
+            sb.append("  Chaînes appariées : $matched / ${mine.size}" + (if (mine.isEmpty()) " (aucune chaîne de cette source dans le catalogue)" else "") + "\n")
+            val withEpgId = mine.count { !it.epgChannelId.isNullOrBlank() }
+            sb.append("  Chaînes avec identifiant EPG fourni par le serveur : $withEpgId / ${mine.size}\n")
+            if (unmatched.isNotEmpty()) sb.append("  Non appariées (exemples) : " + unmatched.joinToString(" | ") { "${it.name} [id=${it.epgChannelId ?: "∅"}]" } + "\n")
+            sb.append("  Identifiants du guide (exemples) : " + ids.take(8).joinToString(", ") + "\n")
+        }
+        sb.toString().trimEnd()
     }
 
     /** Vide les caches EPG (mémoire + disque) : le prochain affichage retélécharge le guide. */
@@ -216,9 +299,10 @@ class OnyxRepository(
                 val short = runCatching { xt.shortEpg(src, sid, limit = 24) }.getOrDefault(emptyList())
                 return@run short.sortedBy { it.start }
             }
-            // M3U : XMLTV de la source (cache), apparié par tvg-id puis par nom.
-            val m3u = sources.filterIsInstance<PlaylistSource.M3u>().firstOrNull { !it.epgUrl.isNullOrBlank() }
-                ?: return@run emptyList()
+            // M3U : XMLTV de LA source de la chaîne (id « m3u:<source>:… »), sinon la première qui en a un.
+            val m3uSourceId = channel.id.split(":").getOrNull(1)
+            val m3uAll = sources.filterIsInstance<PlaylistSource.M3u>().filter { !it.epgUrl.isNullOrBlank() }
+            val m3u = m3uAll.firstOrNull { it.id == m3uSourceId } ?: m3uAll.firstOrNull() ?: return@run emptyList()
             val idx = runCatching { xmltvIndex(m3u.epgUrl!!) }.getOrDefault(emptyMap())
             matchInIndex(idx, channel.epgChannelId, channel.name).sortedBy { it.start }
         }

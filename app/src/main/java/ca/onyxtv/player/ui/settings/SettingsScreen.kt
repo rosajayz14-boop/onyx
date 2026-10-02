@@ -101,6 +101,22 @@ fun SettingsScreen(vm: OnyxViewModel) {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     SourceRow(s) { vm.removeSource(s.id) }
                     if (s is PlaylistSource.Xtream) {
+                        val accounts by vm.accounts.collectAsStateWithLifecycle()
+                        accounts[s.id]?.let { a ->
+                            val days = a.daysLeft
+                            val exp = a.expiresAt?.let { SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(Date(it)) }
+                            val warn = days != null && days <= 7
+                            Text(
+                                buildString {
+                                    append("Compte : ").append(a.status)
+                                    if (exp != null) append(" · expire le ").append(exp)
+                                    if (days != null) append(if (days < 0) " (EXPIRÉ)" else " (dans $days j)")
+                                    if (a.maxCons != null) append(" · connexions ").append(a.activeCons ?: 0).append('/').append(a.maxCons)
+                                },
+                                color = if (warn) OnyxLive else OnyxCyan,
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                        }
                         val hls = s.liveExtension == "m3u8"
                         Button(onClick = { vm.setLiveExtension(s.id, if (hls) "ts" else "m3u8") }) {
                             Text("Flux live : ${if (hls) "HLS (m3u8)" else "MPEG-TS"} — basculer si certaines chaînes ne se lisent pas")
@@ -359,8 +375,13 @@ private fun UpdateCard(vm: OnyxViewModel, state: OnyxUiState) {
             Button(onClick = { vm.refreshEpg(); epgNote = "Guide en cours de rechargement depuis le serveur…" }) {
                 Text("🗓 Mettre à jour le guide (EPG)")
             }
+            Button(onClick = { vm.testEpg() }) { Text("🔎 Tester le guide") }
         }
         epgNote?.let { Text(it, color = OnyxCyan, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 8.dp)) }
+        val epgTest by vm.epgTest.collectAsStateWithLifecycle()
+        epgTest?.let {
+            Text(it, color = OnyxMuted, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 8.dp))
+        }
         Text(
             "Liste de lecture ET guide TV sont mis à jour automatiquement une fois par jour, en arrière-plan, et à l'ouverture si les données datent de plus de 24 h.",
             color = OnyxMuted, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 8.dp),
@@ -393,6 +414,21 @@ private fun PlaybackCard(vm: OnyxViewModel) {
                 val n = steps[(i.coerceAtLeast(0) + 1) % steps.size]
                 vm.setSeekSteps(n.first, n.second)
             }) { Text("◀ ${prefs.seekBackSeconds} s / ▶ ${prefs.seekForwardSeconds} s") }
+        }
+        Spacer(Modifier.height(8.dp))
+        Button(onClick = { vm.setLivePreview(!prefs.livePreview) }) {
+            Text("Aperçu vidéo de la chaîne dans TV en direct : ${if (prefs.livePreview) "Oui" else "Non"}")
+        }
+        Spacer(Modifier.height(8.dp))
+        Text("Sous-titres", color = OnyxCyan, style = MaterialTheme.typography.titleMedium)
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            val scales = listOf(0.8f, 1f, 1.25f, 1.5f, 2f)
+            Button(onClick = {
+                val i = scales.indexOfFirst { kotlin.math.abs(it - prefs.subtitleScale) < 0.01f }
+                vm.setSubtitleStyle(scale = scales[(i.coerceAtLeast(0) + 1) % scales.size])
+            }) { Text("Taille ×${prefs.subtitleScale}") }
+            Button(onClick = { vm.setSubtitleStyle(background = !prefs.subtitleBackground) }) { Text("Fond : ${if (prefs.subtitleBackground) "sombre" else "aucun"}") }
+            Button(onClick = { vm.setSubtitleStyle(yellow = !prefs.subtitleYellow) }) { Text("Couleur : ${if (prefs.subtitleYellow) "jaune" else "blanc"}") }
         }
     }
 }

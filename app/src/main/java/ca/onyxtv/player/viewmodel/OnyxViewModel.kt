@@ -197,6 +197,32 @@ class OnyxViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { userStore.updatePrefs { it.copy(seekBackSeconds = back, seekForwardSeconds = forward) } }
     }
 
+    fun setLivePreview(enabled: Boolean) {
+        viewModelScope.launch { userStore.updatePrefs { it.copy(livePreview = enabled) } }
+    }
+
+    fun setSubtitleStyle(scale: Float? = null, background: Boolean? = null, yellow: Boolean? = null) {
+        viewModelScope.launch {
+            userStore.updatePrefs {
+                it.copy(subtitleScale = scale ?: it.subtitleScale, subtitleBackground = background ?: it.subtitleBackground, subtitleYellow = yellow ?: it.subtitleYellow)
+            }
+        }
+    }
+
+    // ---- Comptes Xtream : statut / expiration / connexions ----
+    private val _accounts = MutableStateFlow<Map<String, OnyxRepository.AccountInfo>>(emptyMap())
+    val accounts: StateFlow<Map<String, OnyxRepository.AccountInfo>> = _accounts.asStateFlow()
+
+    fun refreshAccounts() {
+        viewModelScope.launch {
+            val xts = sources.value.filterIsInstance<PlaylistSource.Xtream>()
+            if (xts.isEmpty()) return@launch
+            val m = HashMap<String, OnyxRepository.AccountInfo>()
+            xts.forEach { src -> runCatching { repo.accountInfo(src) }.getOrNull()?.let { m[src.id] = it } }
+            if (m.isNotEmpty()) _accounts.value = m
+        }
+    }
+
     // ---- Mise à jour de l'application (vérification quotidienne) ----
     private val _update = MutableStateFlow(UpdateUi())
     val update: StateFlow<UpdateUi> = _update.asStateFlow()
@@ -319,6 +345,7 @@ class OnyxViewModel(app: Application) : AndroidViewModel(app) {
             }
             // 2) Rafraîchissement automatique si le cache est absent, vide ou ancien.
             if (cached == null || cached.isEmpty || cached.isStale(AUTO_REFRESH_MS)) refresh()
+            else refreshAccounts()
         }
         checkForUpdate()
     }
@@ -340,7 +367,8 @@ class OnyxViewModel(app: Application) : AndroidViewModel(app) {
                     val merged = mergeWithPrevious(fresh, _state.value)
                     cache.save(merged)
                     // Guide TV : précharger le xmltv des comptes en arrière-plan (ouverture déjà remplie).
-                    viewModelScope.launch { runCatching { repo.prefetchEpg() }; _state.update { it.copy(epgVersion = it.epgVersion + 1) } }
+                    viewModelScope.launch { runCatching { repo.prefetchEpg(merged.channels) }; _state.update { it.copy(epgVersion = it.epgVersion + 1) } }
+                    refreshAccounts()
                     val nothing = merged.isEmpty && merged.reports.any { it.error != null }
                     _state.update {
                         it.copy(
@@ -389,6 +417,24 @@ class OnyxViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { it.copy(epgVersion = it.epgVersion + 1) }
         viewModelScope.launch {
             runCatching { repo.refreshEpgFromNetwork() }
+            runCatching { repo.prefetchEpg(_state.value.channels) }
+            _state.update { it.copy(epgVersion = it.epgVersion + 1) }
+        }
+    }
+
+    /** État du guide (programmes, chaînes appariées) pour le bandeau du Guide TV. */
+    val epgStatus: StateFlow<OnyxRepository.EpgStatus?> get() = repo.epgStatus
+
+    private val _epgTest = MutableStateFlow<String?>(null)
+    /** Résultat du test du guide (Réglages). */
+    val epgTest: StateFlow<String?> = _epgTest.asStateFlow()
+
+    fun testEpg() {
+        if (_epgTest.value == "Test du guide en cours… (téléchargement complet, patientez)") return
+        _epgTest.value = "Test du guide en cours… (téléchargement complet, patientez)"
+        viewModelScope.launch {
+            _epgTest.value = runCatching { repo.epgReport(_state.value.channels) }.getOrElse { "Échec du test : ${Http.describe(it)}" }
+            runCatching { repo.prefetchEpg(_state.value.channels) }
             _state.update { it.copy(epgVersion = it.epgVersion + 1) }
         }
     }

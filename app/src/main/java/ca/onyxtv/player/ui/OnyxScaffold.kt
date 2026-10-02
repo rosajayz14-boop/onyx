@@ -393,6 +393,9 @@ fun OnyxRoot(vm: OnyxViewModel = viewModel()) {
                     nowPlaying = { t -> vm.nowPlaying(t) },
                     seekBackSeconds = prefs.seekBackSeconds,
                     seekForwardSeconds = prefs.seekForwardSeconds,
+                    subtitleScale = prefs.subtitleScale,
+                    subtitleBackground = prefs.subtitleBackground,
+                    subtitleYellow = prefs.subtitleYellow,
                 )
             }
         }

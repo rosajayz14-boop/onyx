@@ -43,7 +43,7 @@ data class XtAuthResponse(
 
 @Serializable
 data class XtUserInfo(
-    @SerialName("auth") val auth: Int = 0,
+    @Serializable(with = LenientInt::class) @SerialName("auth") val auth: Int? = null,
     @SerialName("status") val status: String = "",
     @SerialName("exp_date") val expDate: String? = null,
     @SerialName("active_cons") val activeCons: String? = null,

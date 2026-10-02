@@ -108,6 +108,7 @@ fun LiveTvScreen(vm: OnyxViewModel, onPlay: (PlayTarget) -> Unit) {
     // la sélection sur la première chaîne alors que le focus est ailleurs.
     var selectedId by remember { mutableStateOf<String?>(null) }
     val selected = remember(filtered, selectedId) { filtered.firstOrNull { it.id == selectedId } ?: filtered.firstOrNull() }
+    val prefs by vm.prefs.collectAsStateWithLifecycle()
 
     fun selectGroup(g: String) {
         if (g in hidden) pendingLocked = g else group = g
@@ -159,9 +160,7 @@ fun LiveTvScreen(vm: OnyxViewModel, onPlay: (PlayTarget) -> Unit) {
                             headlineContent = {
                                 Text((c.number?.let { "$it · " } ?: "") + c.name, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             },
-                            supportingContent = {
-                                c.groupTitle?.let { Text(it, maxLines = 1, color = OnyxMuted, overflow = TextOverflow.Ellipsis) }
-                            },
+                            supportingContent = { NowNextLine(vm, c, state.epgVersion) },
                             trailingContent = {
                                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                     if (c.archiveDays > 0) Text("↺", color = OnyxMuted)
@@ -183,6 +182,7 @@ fun LiveTvScreen(vm: OnyxViewModel, onPlay: (PlayTarget) -> Unit) {
                 EpgPanel(
                     vm = vm,
                     channel = ch,
+                    preview = prefs.livePreview,
                     epgVersion = state.epgVersion,
                     isFavorite = ch.id in favorites,
                     onToggleFavorite = { vm.toggleFavorite(ch.id) },
@@ -217,10 +217,33 @@ private fun GroupItem(name: String, count: Int, selected: Boolean, onClick: () -
     )
 }
 
+/** « ● En cours » avec barre de progression, puis « À suivre », sous le nom de la chaîne. */
+@Composable
+private fun NowNextLine(vm: OnyxViewModel, c: Channel, epgVersion: Int) {
+    val programs by produceState(initialValue = emptyList<EpgProgram>(), c.id, epgVersion) {
+        value = runCatching { vm.epgFor(c) }.getOrDefault(emptyList())
+    }
+    val now = System.currentTimeMillis()
+    val cur = programs.firstOrNull { it.isLiveAt(now) }
+    val next = programs.firstOrNull { it.start >= (cur?.stop ?: now) }
+    if (cur == null) {
+        c.groupTitle?.let { Text(it, maxLines = 1, color = OnyxMuted, overflow = TextOverflow.Ellipsis) }
+        return
+    }
+    Column {
+        Text("● " + cur.title, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium)
+        Box(Modifier.fillMaxWidth(0.9f).padding(top = 3.dp, bottom = 2.dp).height(3.dp).clip(RoundedCornerShape(2.dp)).background(OnyxSurfaceHi)) {
+            Box(Modifier.fillMaxHeight().fillMaxWidth(cur.progressAt(now)).background(OnyxCyan))
+        }
+        next?.let { Text("À suivre : ${it.title}", maxLines = 1, overflow = TextOverflow.Ellipsis, color = OnyxMuted, style = MaterialTheme.typography.bodySmall) }
+    }
+}
+
 @Composable
 private fun EpgPanel(
     vm: OnyxViewModel,
     channel: Channel,
+    preview: Boolean,
     epgVersion: Int,
     isFavorite: Boolean,
     onToggleFavorite: () -> Unit,
@@ -241,7 +264,8 @@ private fun EpgPanel(
                 .height(200.dp)
                 .clip(RoundedCornerShape(12.dp))
         ) {
-            Thumbnail(channel.logoUrl, channel.name.take(2).uppercase(), channel.id, Modifier.fillMaxSize())
+            if (preview) ChannelPreview(channel, Modifier.fillMaxSize())
+            else Thumbnail(channel.logoUrl, channel.name.take(2).uppercase(), channel.id, Modifier.fillMaxSize())
         }
 
         Text(

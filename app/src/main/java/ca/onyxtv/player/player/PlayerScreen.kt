@@ -182,6 +182,9 @@ fun PlayerScreen(
     nowPlaying: (suspend (PlayTarget) -> String?)? = null,
     seekBackSeconds: Int = 10,
     seekForwardSeconds: Int = 30,
+    subtitleScale: Float = 1f,
+    subtitleBackground: Boolean = true,
+    subtitleYellow: Boolean = false,
 ) {
     val context = LocalContext.current
     // Repli « image noire » : rendu TextureView, puis décodeur LOGICIEL (nouveau lecteur).
@@ -223,6 +226,10 @@ fun PlayerScreen(
     var okLatched by remember { mutableStateOf(false) }
     // Direct sans extension renvoyant du HLS : un seul nouvel essai en forçant le type m3u8.
     var hlsRetried by remember { mutableStateOf(false) }
+    // Minuterie de sommeil (epoch ms, 0 = inactive) et vitesse de lecture (VOD).
+    var sleepAt by remember { mutableStateOf(0L) }
+    var speed by remember { mutableStateOf(1f) }
+    var sleepLeft by remember { mutableStateOf(0L) }
     val scope = androidx.compose.runtime.rememberCoroutineScope()
 
     // Fenêtre « générique » (3 dernières minutes) pour la VOD : ▲ lance l'épisode suivant.
@@ -557,6 +564,16 @@ fun PlayerScreen(
         }
     }
     LaunchedEffect(fallbackNote) { if (fallbackNote != null) { delay(6_000); fallbackNote = null } }
+    // Minuterie : à l'échéance, pause + sortie du lecteur.
+    LaunchedEffect(sleepAt) {
+        if (sleepAt <= 0L) { sleepLeft = 0L; return@LaunchedEffect }
+        while (isActive) {
+            sleepLeft = sleepAt - System.currentTimeMillis()
+            if (sleepLeft <= 0L) { runCatching { exo.pause() }; onExit(); return@LaunchedEffect }
+            delay(1_000)
+        }
+    }
+    LaunchedEffect(exo, speed) { runCatching { exo.setPlaybackSpeed(speed) } }
     LaunchedEffect(seekNote) { if (seekNote != null) { delay(1_800); seekNote = null } }
 
     LaunchedEffect(exo, target.url) {
@@ -675,6 +692,24 @@ fun PlayerScreen(
             update = { view ->
                 if (view.player !== exo) view.player = exo
                 if (view.resizeMode != resize) view.resizeMode = resize
+                // Style des sous-titres (Réglages → Lecture) : taille, fond, couleur.
+                runCatching {
+                    view.subtitleView?.apply {
+                        setApplyEmbeddedStyles(false)
+                        setApplyEmbeddedFontSizes(false)
+                        setFractionalTextSize(androidx.media3.ui.SubtitleView.DEFAULT_TEXT_SIZE_FRACTION * subtitleScale)
+                        setStyle(
+                            androidx.media3.ui.CaptionStyleCompat(
+                                if (subtitleYellow) android.graphics.Color.YELLOW else android.graphics.Color.WHITE,
+                                if (subtitleBackground) android.graphics.Color.argb(160, 0, 0, 0) else android.graphics.Color.TRANSPARENT,
+                                android.graphics.Color.TRANSPARENT,
+                                androidx.media3.ui.CaptionStyleCompat.EDGE_TYPE_OUTLINE,
+                                android.graphics.Color.BLACK,
+                                null,
+                            )
+                        )
+                    }
+                }
             },
             onRelease = { it.player = null },
         ) }
@@ -719,6 +754,7 @@ fun PlayerScreen(
             ended || error != null || panelOpen -> null
             seekNote != null -> seekNote
             fallbackNote != null -> fallbackNote
+            sleepLeft in 1..60_000L -> "💤 Arrêt dans ${sleepLeft / 1000} s"
             inCredits -> "▲ Passer le générique → épisode suivant"
             else -> null
         }
@@ -795,6 +831,26 @@ fun PlayerScreen(
                     Text("Navigation", style = MaterialTheme.typography.titleMedium, color = OnyxCyan, modifier = Modifier.padding(top = 8.dp))
                     if (target.next != null) Button(onClick = { skipCredits() }) { Text("⏭ Épisode suivant") }
                     Text("◀ −$seekBackSeconds s   ▶ +$seekForwardSeconds s   ▲ générique → épisode suivant", color = OnyxMuted, style = MaterialTheme.typography.bodyMedium)
+                }
+
+                Text("Minuterie de sommeil", style = MaterialTheme.typography.titleMedium, color = OnyxCyan, modifier = Modifier.padding(top = 8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf(0, 15, 30, 60, 90).forEach { m ->
+                        val on = if (m == 0) sleepAt == 0L else sleepAt > 0L && kotlin.math.abs((sleepAt - System.currentTimeMillis()) - m * 60_000L) < 90_000L
+                        Button(onClick = { sleepAt = if (m == 0) 0L else System.currentTimeMillis() + m * 60_000L }) {
+                            Text((if (on) "✓ " else "") + (if (m == 0) "Off" else "$m min"))
+                        }
+                    }
+                }
+                if (sleepLeft > 0L) Text("Arrêt dans ${fmtClock(sleepLeft)}", color = OnyxMuted, style = MaterialTheme.typography.bodyMedium)
+
+                if (!target.isLive) {
+                    Text("Vitesse", style = MaterialTheme.typography.titleMedium, color = OnyxCyan, modifier = Modifier.padding(top = 8.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf(0.75f, 1f, 1.25f, 1.5f, 2f).forEach { sp ->
+                            Button(onClick = { speed = sp }) { Text((if (kotlin.math.abs(speed - sp) < 0.01f) "✓ " else "") + "×$sp") }
+                        }
+                    }
                 }
 
                 Text("Format d'image", style = MaterialTheme.typography.titleMedium, color = OnyxCyan, modifier = Modifier.padding(top = 8.dp))

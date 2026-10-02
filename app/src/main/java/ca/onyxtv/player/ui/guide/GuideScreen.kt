@@ -138,6 +138,19 @@ fun GuideScreen(vm: OnyxViewModel, onPlay: (PlayTarget) -> Unit) {
     }
 
     Column(Modifier.fillMaxSize().padding(start = 24.dp, end = 24.dp, top = 20.dp, bottom = 12.dp)) {
+        val epgStatus by vm.epgStatus.collectAsStateWithLifecycle()
+        epgStatus?.let { st ->
+            if (st.matched == 0 || prefs.diagnostics) {
+                Text(
+                    if (st.programmes == 0) "Guide vide : ${st.detail.ifBlank { "le serveur n'a renvoyé aucun programme" }} — Réglages → « Tester le guide » pour le détail."
+                    else "Guide : ${st.programmes} programmes · ${st.guideChannels} chaînes · appariées ${st.matched}/${st.checked}" +
+                        (if (st.matched == 0) " — aucune chaîne du compte ne correspond aux identifiants du guide (Réglages → « Tester le guide »)." else ""),
+                    color = if (st.matched == 0) OnyxLive else OnyxMuted,
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.padding(bottom = 6.dp),
+                )
+            }
+        }
         if (prefs.diagnostics && shown.isNotEmpty()) {
             val diag by produceState("EPG DIAG · …", shown.first().id, state.epgVersion) {
                 value = "EPG DIAG · " + runCatching { vm.epgDiag(shown.first()) }.getOrElse { "err ${it.message}" }
