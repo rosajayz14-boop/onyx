@@ -452,6 +452,8 @@ fun OnyxRoot(vm: OnyxViewModel = viewModel()) {
                     subtitleYellow = prefs.subtitleYellow,
                     channelList = { vm.zapList() },
                     previous = { vm.previousChannel()?.toPlayTarget() },
+                    canShift = { t -> vm.canTimeshift(t) },
+                    timeshift = { live, start -> vm.timeshiftTarget(live, start) },
                 )
             }
         }

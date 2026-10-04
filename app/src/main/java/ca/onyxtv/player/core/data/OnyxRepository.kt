@@ -678,6 +678,20 @@ class OnyxRepository(
         return xt.timeshiftUrl(src, streamId, program.start, minutes)
     }
 
+    /**
+     * URL de différé (timeshift) d'une chaîne à partir de l'instant réel [startMs], pour [minutes]
+     * minutes ; null si la chaîne n'a pas d'archive ou si l'instant est hors archive.
+     */
+    suspend fun timeshiftUrl(channel: Channel, startMs: Long, minutes: Int): String? {
+        if (channel.archiveDays <= 0) return null
+        val streamId = channel.streamId ?: return null
+        val now = System.currentTimeMillis()
+        if (startMs < now - channel.archiveDays * 86_400_000L || startMs > now) return null
+        val sourceId = channel.id.split(":").getOrNull(1) ?: return null
+        val src = store.sources.first().filterIsInstance<PlaylistSource.Xtream>().firstOrNull { it.id == sourceId } ?: return null
+        return xt.timeshiftUrl(src, streamId, startMs, minutes.coerceIn(1, 360))
+    }
+
     /** Fiche d'un film. Null si la source n'existe plus. id = "xt:<sourceId>:vod:<streamId>" */
     suspend fun movieDetail(item: VodItem): MovieDetail? {
         val parts = item.id.split(":")

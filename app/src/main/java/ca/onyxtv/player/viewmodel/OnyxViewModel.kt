@@ -694,6 +694,18 @@ class OnyxViewModel(app: Application) : AndroidViewModel(app) {
 
     // ---- Rattrapage (catch-up) ----
     /** Cible de lecture d'un programme déjà diffusé, si le fournisseur l'archive. */
+    /** La chaîne de cette cible offre-t-elle le rattrapage (pause / retour arrière sur le direct) ? */
+    fun canTimeshift(target: PlayTarget): Boolean =
+        (target.id?.let { id -> channelById(id)?.archiveDays } ?: 0) > 0
+
+    /** Cible de différé de la chaîne [live] démarrant à l'instant réel [startMs] (jusqu'au direct). */
+    suspend fun timeshiftTarget(live: PlayTarget, startMs: Long): PlayTarget? {
+        val ch = live.id?.let { channelById(it) } ?: return null
+        val minutes = ((System.currentTimeMillis() - startMs) / 60_000L).toInt().coerceAtLeast(1) + 5
+        val url = repo.timeshiftUrl(ch, startMs, minutes) ?: return null
+        return live.copy(url = url, isLive = true, shiftStartMs = startMs, liveOrigin = live.liveOrigin ?: live, startPositionMs = 0L)
+    }
+
     suspend fun catchupTarget(channel: Channel, program: EpgProgram): PlayTarget? =
         repo.catchupUrl(channel, program)?.let { url ->
             PlayTarget(

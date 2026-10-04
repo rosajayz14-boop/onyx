@@ -95,6 +95,10 @@ data class PlayTarget(
     val next: PlayTarget? = null,
     /** Série d'origine (épisode) : rangée « Continuer la série ». */
     val seriesId: String? = null,
+    /** Différé d'une chaîne (rattrapage Xtream) : instant réel (epoch ms) du début du flux, 0 = direct. */
+    val shiftStartMs: Long = 0L,
+    /** Cible « direct » d'origine d'un flux en différé (retour au direct, zapping, récents). */
+    val liveOrigin: PlayTarget? = null,
 )
 
 /**
@@ -193,6 +197,10 @@ fun PlayerScreen(
     /** Liste des chaînes (superposition ▶ en direct) et chaîne précédente (◀). */
     channelList: (() -> List<ca.onyxtv.player.core.model.Channel>)? = null,
     previous: (() -> PlayTarget?)? = null,
+    /** Différé (pause / retour arrière sur le direct) : la chaîne offre-t-elle le rattrapage ? */
+    canShift: ((PlayTarget) -> Boolean)? = null,
+    /** Cible de différé de la chaîne [live] à partir de l'instant réel [startMs] (null : pas d'archive). */
+    timeshift: (suspend (PlayTarget, Long) -> PlayTarget?)? = null,
 ) {
     val context = LocalContext.current
     // Repli « image noire » : rendu TextureView, puis décodeur LOGICIEL (nouveau lecteur).
@@ -349,14 +357,70 @@ fun PlayerScreen(
         }
     }
 
+    // ---- Différé sur le direct (rattrapage Xtream) ----
+    // Retour arrière = nouveau flux « timeshift » démarrant à l'instant voulu (granularité : la
+    // minute). Les appuis successifs s'accumulent 700 ms avant de recharger (appui long = recul rapide).
+    var shiftPendingMin by remember { mutableIntStateOf(0) }
+    var shiftJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+    var pausedAtMs by remember { mutableStateOf(0L) }
+    fun liveOrigin(): PlayTarget = currentTarget.liveOrigin ?: currentTarget
+    val shiftable = currentTarget.isLive && timeshift != null && (canShift?.invoke(liveOrigin()) ?: false)
+    /** Instant réel en cours de lecture (différé) ou maintenant (direct). */
+    fun playheadWallMs(): Long = if (currentTarget.shiftStartMs > 0L) currentTarget.shiftStartMs + exo.currentPosition.coerceAtLeast(0L) else System.currentTimeMillis()
+    fun delayMin(): Long = ((System.currentTimeMillis() - playheadWallMs()) / 60_000L).coerceAtLeast(0L)
+    fun goLive() {
+        val origin = liveOrigin()
+        seekNote = "\u25cf Retour au direct"
+        if (currentTarget.shiftStartMs > 0L) currentOnSwitch(origin) else { exo.seekToDefaultPosition(); exo.play() }
+    }
+    /** Charge le différé à l'instant réel [wallMs] (ou revient au direct s'il est trop proche de maintenant). */
+    fun shiftTo(wallMs: Long) {
+        val ts = timeshift ?: return
+        if (wallMs >= System.currentTimeMillis() - 45_000L) { goLive(); return }
+        val origin = liveOrigin()
+        scope.launch {
+            val t = ts(origin, wallMs)
+            if (t == null) seekNote = "Cette cha\u00eene n'offre pas de rattrapage : impossible de reculer."
+            else currentOnSwitch(t)
+        }
+    }
+    fun shiftBy(deltaMin: Int) {
+        if (!currentTarget.isLive) return
+        if (!shiftable) { seekNote = "Cette cha\u00eene n'offre pas de rattrapage : pause et retour arri\u00e8re indisponibles."; return }
+        shiftPendingMin += deltaMin
+        val total = delayMin() - shiftPendingMin
+        seekNote = if (total <= 0L) "\u25cf Retour au direct" else "\u23ea Diff\u00e9r\u00e9 \u2212$total min"
+        shiftJob?.cancel()
+        shiftJob = scope.launch {
+            delay(700)
+            val d = shiftPendingMin; shiftPendingMin = 0
+            shiftTo(playheadWallMs() + d * 60_000L)
+        }
+    }
+
     /** Pause ↔ lecture, y compris pendant la mise en mémoire tampon (isPlaying y est faux). */
     fun togglePlay() {
-        if (exo.playWhenReady) exo.pause() else exo.play()
+        if (exo.playWhenReady) {
+            exo.pause()
+            pausedAtMs = System.currentTimeMillis()
+            if (currentTarget.isLive) seekNote = if (shiftable) "\u23f8 Pause \u2014 OK pour reprendre o\u00f9 vous en \u00e9tiez" else "\u23f8 Pause (sans rattrapage : la reprise rejoint le direct)"
+        } else {
+            val pausedFor = if (pausedAtMs > 0L) System.currentTimeMillis() - pausedAtMs else 0L
+            pausedAtMs = 0L
+            // Direct mis en pause plus de 20 s : la mémoire tampon ne suit pas ; on reprend en différé
+            // à l'instant de la pause (rattrapage) au lieu de sauter au direct.
+            if (currentTarget.isLive && shiftable && pausedFor > 20_000L) {
+                val resumeAt = playheadWallMs() - pausedFor
+                exo.play()
+                shiftTo(resumeAt)
+            } else exo.play()
+        }
         runCatching { playerView?.showController() }
     }
 
     fun seekBy(deltaMs: Long) {
-        if (currentTarget.isLive || !exo.isCurrentMediaItemSeekable) return
+        if (currentTarget.isLive) { shiftBy(if (deltaMs < 0) -1 else 1); return }
+        if (!exo.isCurrentMediaItemSeekable) return
         val dur = exo.duration.takeIf { it != C.TIME_UNSET } ?: return
         val to = (exo.currentPosition + deltaMs).coerceIn(0L, dur)
         exo.seekTo(to)
@@ -366,7 +430,8 @@ fun PlayerScreen(
 
     // Remontée de progression. Pour la VOD, on ignore une durée inconnue (sortie rapide, flux en
     // échec) : sinon on écrirait « durée 0 » et on EFFACERAIT le point de reprise existant.
-    fun report(t: PlayTarget) {
+    fun report(t0: PlayTarget) {
+        val t = t0.liveOrigin ?: t0
         val dur = exo.duration
         if (!t.isLive && (dur == C.TIME_UNSET || dur <= 0L || exo.playbackState == Player.STATE_IDLE)) return
         currentOnProgress(t, exo.currentPosition, if (dur == C.TIME_UNSET) 0L else dur)
@@ -681,8 +746,11 @@ fun PlayerScreen(
                     // VOD : ◀ / ▶ = recul / avance (toujours actifs).
                     !currentTarget.isLive && ev.key == Key.DirectionLeft -> { seekBy(-seekBackSeconds * 1000L); true }
                     !currentTarget.isLive && ev.key == Key.DirectionRight -> { seekBy(seekForwardSeconds * 1000L); true }
-                    // Direct : ◀ = chaîne précédente (rappel), ▶ = liste des chaînes.
+                    // Direct avec rattrapage : ◀ = reculer d'une minute (différé) ; sinon ◀ = chaîne précédente.
+                    currentTarget.isLive && ev.key == Key.DirectionLeft && shiftable -> { shiftBy(-1); true }
                     currentTarget.isLive && ev.key == Key.DirectionLeft -> { previous?.invoke()?.let { currentOnSwitch(it) }; true }
+                    // Différé : ▶ = avancer d'une minute / revenir au direct ; direct : ▶ = liste des chaînes.
+                    currentTarget.isLive && ev.key == Key.DirectionRight && currentTarget.shiftStartMs > 0L -> { shiftBy(+1); true }
                     currentTarget.isLive && ev.key == Key.DirectionRight && channelList != null -> { listOpen = true; true }
                     digit != null && currentTarget.isLive && currentZapToNumber != null -> {
                         if (digits.length < 4) digits += digit
@@ -756,7 +824,8 @@ fun PlayerScreen(
                     .padding(horizontal = 28.dp, vertical = 24.dp)
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    if (target.isLive) Text("● DIRECT", color = OnyxLive, style = MaterialTheme.typography.labelLarge)
+                    if (target.isLive && target.shiftStartMs > 0L) Text("\u23ea DIFF\u00c9R\u00c9 \u2212${delayMin()} min", color = OnyxCyan, style = MaterialTheme.typography.labelLarge)
+                    else if (target.isLive) Text("● DIRECT", color = OnyxLive, style = MaterialTheme.typography.labelLarge)
                     target.subtitle?.let {
                         Text(it.uppercase(), style = MaterialTheme.typography.labelLarge, color = OnyxCyan)
                     }
@@ -769,6 +838,7 @@ fun PlayerScreen(
                 Text(
                     buildString {
                         if (target.isLive && zap != null) append("↑ ↓ chaîne  ·  0-9 numéro  ·  ")
+                        if (shiftable) append("OK pause  ·  ◀ reculer  ·  ▶ avancer / direct  ·  ")
                         append("Menu ≡ pistes & image")
                     },
                     style = MaterialTheme.typography.bodyMedium,
@@ -883,6 +953,22 @@ fun PlayerScreen(
             ) {
                 Text("Lecture", style = MaterialTheme.typography.headlineMedium, color = Color.White)
 
+                if (target.isLive) {
+                    Text("Direct", style = MaterialTheme.typography.titleMedium, color = OnyxCyan, modifier = Modifier.padding(top = 8.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (shiftable) {
+                            Button(onClick = { panelOpen = false; shiftBy(-5) }) { Text("⏪ Reculer 5 min") }
+                            Button(onClick = { panelOpen = false; shiftBy(-15) }) { Text("⏪ Reculer 15 min") }
+                            if (target.shiftStartMs > 0L) Button(onClick = { panelOpen = false; goLive() }) { Text("● Revenir au direct") }
+                        }
+                        previous?.invoke()?.let { prev -> Button(onClick = { panelOpen = false; currentOnSwitch(prev) }) { Text("↩ Chaîne précédente") } }
+                    }
+                    Text(
+                        if (shiftable) "OK = pause (reprise là où vous en étiez)  ·  ◀ −1 min  ·  ▶ +1 min / direct  ·  ⏪ ⏩ idem"
+                        else "Cette chaîne n'offre pas de rattrapage : pause courte seulement, ◀ = chaîne précédente",
+                        color = OnyxMuted, style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
                 if (!target.isLive) {
                     Text("Navigation", style = MaterialTheme.typography.titleMedium, color = OnyxCyan, modifier = Modifier.padding(top = 8.dp))
                     if (target.next != null) Button(onClick = { skipCredits() }) { Text("⏭ Épisode suivant") }

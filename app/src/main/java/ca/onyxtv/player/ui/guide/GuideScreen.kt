@@ -35,6 +35,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
@@ -114,14 +119,17 @@ fun GuideScreen(vm: OnyxViewModel, onPlay: (PlayTarget) -> Unit) {
     LaunchedEffect(Unit) { while (true) { delay(60_000); now = System.currentTimeMillis() } }
     // Période affichée : maintenant, ce soir (20 h), demain (même heure).
     var dayMode by remember { mutableIntStateOf(0) }
-    val windowStart = remember(now / (SLOT_MIN * MS_PER_MIN), dayMode) {
+    // Décalage manuel de la fenêtre (◀ / ▶ sur la cellule d'une chaîne : −30 / +30 min) pour
+    // remonter dans le passé (rattrapage) ou avancer. Remis à zéro par « Maintenant ».
+    var offsetMin by remember { mutableIntStateOf(0) }
+    val windowStart = remember(now / (SLOT_MIN * MS_PER_MIN), dayMode, offsetMin) {
         val slot = SLOT_MIN * MS_PER_MIN
         val base = when (dayMode) {
             1 -> java.util.Calendar.getInstance().apply { timeInMillis = now; set(java.util.Calendar.HOUR_OF_DAY, 20); set(java.util.Calendar.MINUTE, 0); set(java.util.Calendar.SECOND, 0) }.timeInMillis - WINDOW_BEFORE_MIN * MS_PER_MIN
             2 -> now + 24 * 3_600_000L - WINDOW_BEFORE_MIN * MS_PER_MIN
             else -> now - WINDOW_BEFORE_MIN * MS_PER_MIN
         }
-        (base / slot) * slot
+        (base / slot) * slot + offsetMin * MS_PER_MIN
     }
     val windowEnd = windowStart + WINDOW_MIN * MS_PER_MIN
     val nowX = if (now in windowStart..windowEnd) minutesToDp((now - windowStart) / MS_PER_MIN) else (-100).dp
@@ -191,7 +199,7 @@ fun GuideScreen(vm: OnyxViewModel, onPlay: (PlayTarget) -> Unit) {
 
         // Filtres de catégorie
         LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(vertical = 8.dp)) {
-            item { Chip("Maintenant", dayMode == 0) { dayMode = 0 } }
+            item { Chip("Maintenant", dayMode == 0 && offsetMin == 0) { dayMode = 0; offsetMin = 0 } }
             item { Chip("Ce soir", dayMode == 1) { dayMode = 1 } }
             item { Chip("Demain", dayMode == 2) { dayMode = 2 } }
             item { Text("│", color = OnyxMuted, modifier = Modifier.padding(horizontal = 4.dp)) }
@@ -203,7 +211,11 @@ fun GuideScreen(vm: OnyxViewModel, onPlay: (PlayTarget) -> Unit) {
         // En-tête des heures (défile avec les lignes)
         Row(Modifier.fillMaxWidth().height(28.dp)) {
             Box(Modifier.width(CHANNEL_COL), contentAlignment = Alignment.CenterStart) {
-                Text("${shown.size} chaînes · " + java.text.SimpleDateFormat("EEE d MMM", java.util.Locale.getDefault()).format(java.util.Date(windowStart + WINDOW_BEFORE_MIN * MS_PER_MIN)), color = OnyxMuted, style = MaterialTheme.typography.bodyMedium, maxLines = 1)
+                Text(
+                    "${shown.size} chaînes · " + java.text.SimpleDateFormat("EEE d MMM", java.util.Locale.getDefault()).format(java.util.Date(windowStart + WINDOW_BEFORE_MIN * MS_PER_MIN)) +
+                        (if (offsetMin < 0) "  ⏪ ${-offsetMin} min" else if (offsetMin > 0) "  ⏩ +$offsetMin min" else "") + "  ·  ◀ ▶ sur la chaîne : −30 / +30 min",
+                    color = if (offsetMin != 0) OnyxCyan else OnyxMuted, style = MaterialTheme.typography.bodyMedium, maxLines = 1,
+                )
             }
             Box(Modifier.weight(1f).fillMaxHeight().horizontalScroll(hScroll)) {
                 Row {
@@ -235,6 +247,7 @@ fun GuideScreen(vm: OnyxViewModel, onPlay: (PlayTarget) -> Unit) {
                     hScroll = hScroll,
                     isFavorite = ch.id in favorites,
                     onFocus = { p -> focus = GuideFocus(ch, p) },
+                    onShift = { d -> offsetMin = (offsetMin + d).coerceIn(-6 * 60, 48 * 60) },   // le guide conserve 6 h de passé
                     onOpen = { p ->
                         when {
                             p == null || p.isLiveAt(now) || p.start > now -> onPlay(ch.toPlayTarget())
@@ -276,7 +289,7 @@ private fun DetailsPanel(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (focus == null) {
-            Text("Déplacez-vous dans la grille : OK pour regarder, revoir ou enregistrer.", color = OnyxMuted)
+            Text("Déplacez-vous dans la grille : OK pour regarder, revoir ou enregistrer. Sur une chaîne, ◀ recule la grille de 30 min (rattrapage).", color = OnyxMuted)
             return
         }
         val ch = focus.channel
@@ -337,6 +350,7 @@ private fun GuideRow(
     hScroll: androidx.compose.foundation.ScrollState,
     isFavorite: Boolean,
     onFocus: (EpgProgram?) -> Unit,
+    onShift: (Int) -> Unit,
     onOpen: (EpgProgram?) -> Unit,
 ) {
     val allPrograms by produceState(initialValue = emptyList<EpgProgram>(), channel.id, epgVersion) {
@@ -354,6 +368,16 @@ private fun GuideRow(
             modifier = Modifier
                 .width(CHANNEL_COL)
                 .fillMaxHeight()
+                // ◀ sur la chaîne : la grille recule de 30 min (appui long = recul continu) ;
+                // ▶ avance de 30 min tant que la fenêtre est dans le passé, sinon va aux programmes.
+                .onPreviewKeyEvent { ev ->
+                    if (ev.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                    when (ev.key) {
+                        Key.DirectionLeft -> { onShift(-30); true }
+                        Key.DirectionRight -> if (windowStart + WINDOW_BEFORE_MIN * MS_PER_MIN < now - 30 * MS_PER_MIN) { onShift(30); true } else false
+                        else -> false
+                    }
+                }
                 .padding(end = 6.dp)
                 .onFocusChanged { if (it.isFocused) onFocus(programs.firstOrNull { p -> p.isLiveAt(now) }) },
         ) {
